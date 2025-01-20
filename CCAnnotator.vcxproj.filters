@@ -1,0 +1,51 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Quelldateien">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Headerdateien">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="Ressourcendateien">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="pugixml">
+      <UniqueIdentifier>{e6542f37-7247-4093-995e-ec43e3789191}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="pugixml\src">
+      <UniqueIdentifier>{11afecc8-b759-4176-8f22-e132d68fbffd}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="pugixml\header">
+      <UniqueIdentifier>{54e355b5-25a0-4d0d-b670-c538d876dbe5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="lexbor">
+      <UniqueIdentifier>{39c5f674-b04a-4a35-8e1d-22576cacd2ce}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="CCAnnotator.cpp">
+      <Filter>Quelldateien</Filter>
+    </ClCompile>
+    <ClCompile Include="pugixml\src\pugixml.cpp">
+      <Filter>pugixml\src</Filter>
+    </ClCompile>
+    <ClCompile Include="xmlparser.cpp">
+      <Filter>Quelldateien</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="pugixml\src\pugiconfig.hpp">
+      <Filter>pugixml\header</Filter>
+    </ClInclude>
+    <ClInclude Include="pugixml\src\pugixml.hpp">
+      <Filter>pugixml\header</Filter>
+    </ClInclude>
+    <ClInclude Include="xmlparser.h">
+      <Filter>Quelldateien</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>
