@@ -34,10 +34,11 @@
 # folder excludes
 code_coverage_report/
 .vs/
+.visuallint/
 x64/
 lexbor/
 pugixml/
 gumbo-parser/
 Debug/
 Release/
-
+C++/

@@ -3,20 +3,23 @@
 
 #include <iostream>
 #include <string>
+#include <locale>
 #include "xmlparser.h"
 #include <boost/program_options.hpp>
-
 
 int main(int ac, char** av) {
 
     namespace po = boost::program_options;
     int retVal = 0;
+    std::locale::global(std::locale("en_US.UTF-8"));
     try {
 
         po::options_description desc("Allowed options");
         desc.add_options()
             ("help", "produce help message")
-            ("rootfile", po::value<std::string>(), "specifies the root index file");
+            ("index_file", po::value<std::string>()->default_value("index.html"), "specifies the root index file")
+            ("index_folder", po::value<std::string>()->default_value("./code_coverage_report"), "specifies the index folder")
+            ("source_folder", po::value<std::string>(), "specifies the corresponding source folder");
 
         po::variables_map vm;
         po::store(po::parse_command_line(ac, av, desc), vm);
@@ -27,15 +30,25 @@ int main(int ac, char** av) {
             return 0;
         }
 
-        if (vm.count("rootfile")) {
-            std::cout << "rootfile speciefied as "
-                << vm["rootfile"].as<std::string>() << ".\n";
+        if (vm.count("source_folder")) {
 
-            xml_file_content(vm["rootfile"].as<std::string>());
+            std::cout << "sourcefolder set to "
+                << vm["source_folder"].as<std::string>() << ".\n";
+            std::cout << "index_folder set to "
+                << vm["index_folder"].as<std::string>() << ".\n";
+            std::cout << "index_file speciefied as "
+                << vm["index_file"].as<std::string>() << ".\n";
+
+            std::unordered_map<std::string, std::string> parameters;
+            parameters["index_file"] = vm["index_file"].as<std::string>();
+            parameters["index_folder"] = vm["index_folder"].as<std::string>();
+            parameters["source_folder"] = vm["source_folder"].as<std::string>();
+            const std::string source = vm["index_file"].as<std::string>();
+            retVal = build_node_tree(source, parameters);
 
         }
         else {
-            std::cerr << "root file not set.\n";
+            std::cerr << "source folder not set.\n";
         }
     }
     catch (std::exception& e) {
