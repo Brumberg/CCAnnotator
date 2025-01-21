@@ -4,6 +4,7 @@
 #include <sstream>
 #include <fstream>
 #include <filesystem>
+#include <set>
 #include "gumbo.h"
 extern "C"
 {
@@ -81,6 +82,13 @@ struct ST_HTMLParser
     std::vector<std::vector<ST_TextAttributes>> table;
 };
 
+struct ST_DocumentContent
+{
+    ST_HTMLParser html_index_file;
+    std::unordered_map<std::string, ST_HTMLParser> html_files;
+    std::unordered_map<std::string, std::vector<std::string>> source_files;
+};
+
 /*------------------------------------------------------------------------------------------*//**
 \brief          traverses the index file and returns the table
 \
@@ -90,7 +98,7 @@ struct ST_HTMLParser
 \param[out]     void
 \return         -
 *//*-------------------------------------------------------------------------------------------*/
-static void traverse_nodes(ST_HTMLParser &parser_struct, ST_HTMLTags tags, lxb_dom_node_t* node) {
+static void traverse_nodes(ST_HTMLParser &parser_struct, ST_HTMLTags tags, lxb_dom_node_t* node, bool &initial_table, bool enforce_table_regeneration) {
     lxb_dom_node_t* child = node->first_child;
     while (child != nullptr) {
 
@@ -109,8 +117,12 @@ static void traverse_nodes(ST_HTMLParser &parser_struct, ST_HTMLTags tags, lxb_d
                     ltags.attributes[val] = true;
                     if (val == "table")
                     {
-                        parser_struct.column = parser_struct.row = 0;
-                        parser_struct.table.clear();
+                        if (initial_table == false || enforce_table_regeneration == true)
+                        {
+                            initial_table = true;
+                            parser_struct.column = parser_struct.row = 0;
+                            parser_struct.table.clear();
+                        }
                     }
                     else if (val == "tr")
                     {
@@ -128,6 +140,16 @@ static void traverse_nodes(ST_HTMLParser &parser_struct, ST_HTMLTags tags, lxb_d
                         size_t len;
                         const lxb_char_t* href = lxb_dom_element_get_attribute(element, (const lxb_char_t*)"href", 4, &len);
                         ltags.references["href"] = std::string(reinterpret_cast<const char*>(href));
+                    }
+                    else if (ltags.attributes.find("table") != ltags.attributes.cend() && val == "td" && child->first_child == nullptr)
+                    {
+                        static const std::string empty_string = "";
+                        ST_TextAttributes a;
+                        a.text = std::string(reinterpret_cast<const char*>(""));
+                        a.attributes = ltags.attributes;
+                        a.references = ltags.references;
+                        parser_struct.table.rbegin()->push_back(a);
+                        ++parser_struct.column;
                     }
                     /*else if (val == "td")
                     {
@@ -196,7 +218,7 @@ static void traverse_nodes(ST_HTMLParser &parser_struct, ST_HTMLTags tags, lxb_d
             break;
         }
 
-        traverse_nodes(parser_struct, ltags, child);
+        traverse_nodes(parser_struct, ltags, child, initial_table, enforce_table_regeneration);
         child = child->next;
     }
 }
@@ -230,7 +252,8 @@ static bool parse_html_file(std::string& content, ST_HTMLParser& parser_struct) 
             parser_struct.header_set = false;
             parser_struct.header_description_set = false;
             ST_HTMLTags tags;
-            traverse_nodes(parser_struct, tags, lxb_dom_interface_node(document->body));
+            bool table_initialitzed = true;
+            traverse_nodes(parser_struct, tags, lxb_dom_interface_node(document->body), table_initialitzed, false);
         }
         retVal = true;
     }
@@ -490,6 +513,39 @@ static bool load_html_code(const std::string& root, ST_HTMLParser& parser, std::
     return retVal;
 }
 
+static bool save_and_annotate_source_code(ST_DocumentContent& source)
+{
+    bool retVal = true;
+    for (auto& i : source.html_files)
+    {
+        std::set<size_t> row_set;
+        for (auto& j : source.source_files)
+        {
+            if (j.first.find(i.first) != std::string::npos)
+            {
+                for (auto& k : i.second.table)
+                {
+                    if (k[1].text == std::string("0"))
+                    {
+                        const size_t kk = std::stoull(k[0].text, nullptr, 10);
+                        row_set.insert(kk);
+                    }
+                }
+                break;
+            }
+        }
+        std::vector<std::vector<ST_TextAttributes>>& table = i.second.table;
+        std::vector<ST_TextAttributes> item = table[0];
+        std::unordered_map<std::string, std::string>::const_iterator iter = item[source.html_index_file.file_column].references.find(i.first);
+        if (iter != item[0].references.cend())
+        {
+            std::cout << "Something found" << std::endl;
+        }
+        
+    }
+    return retVal;
+}
+
 /*------------------------------------------------------------------------------------------*//**
 \brief          traverses the index file and returns the table
 \
@@ -503,28 +559,31 @@ bool build_node_tree(std::string source, std::unordered_map<std::string, std::st
     bool retVal = false;
     if (parameter.find("index_file") != parameter.cend() && parameter.find("index_folder") != parameter.cend() && parameter.find("source_folder") != parameter.cend())
     {
-        ST_HTMLParser index_file;
+        ST_DocumentContent index_file;
         const std::string root = parameter["index_folder"] + "/";
-        retVal = get_html_content(root + source, index_file);
+        retVal = get_html_content(root + source, index_file.html_index_file);
         if (retVal == true)
         {
-            retVal = check_index_file(index_file);
+            retVal = check_index_file(index_file.html_index_file);
             if (retVal == true)
             {
-                build_relative_paths(index_file);
+                build_relative_paths(index_file.html_index_file);
                 if (retVal == true)
                 {
-                    retVal = dive_into_folder(parameter["source_folder"], index_file);
+                    retVal = dive_into_folder(parameter["source_folder"], index_file.html_index_file);
                     if (retVal == true)
                     {
                         std::unordered_map<std::string, std::vector<std::string>> source_code;
-                        retVal = load_source_code(index_file, source_code);
+                        retVal = load_source_code(index_file.html_index_file, index_file.source_files);
                         if (retVal == true)
                         {
-                            std::unordered_map<std::string, ST_HTMLParser> html_content;
-                            retVal = load_html_code(root, index_file, html_content);
+                            retVal = load_html_code(root, index_file.html_index_file, index_file.html_files);
                             if (retVal == true)
                             {
+                                retVal = save_and_annotate_source_code(index_file);
+                                if (retVal == true)
+                                {
+                                }
                             }
                         }
                     }

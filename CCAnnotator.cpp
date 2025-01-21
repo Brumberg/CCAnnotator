@@ -19,7 +19,8 @@ int main(int ac, char** av) {
             ("help", "produce help message")
             ("index_file", po::value<std::string>()->default_value("index.html"), "specifies the root index file")
             ("index_folder", po::value<std::string>()->default_value("./code_coverage_report"), "specifies the index folder")
-            ("source_folder", po::value<std::string>(), "specifies the corresponding source folder");
+            ("source_folder", po::value<std::string>(), "specifies the corresponding source folder")
+            ("cc_ignore", po::value<std::string>()->default_value("LLVM_COV_EXCLUDE_LINE"), "specifies the default flag to ignore the line");
 
         po::variables_map vm;
         po::store(po::parse_command_line(ac, av, desc), vm);
