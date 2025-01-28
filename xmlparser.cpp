@@ -1,10 +1,13 @@
 #include "xmlparser.h"
+#include <regex>
+#include <queue>
 #include <string>
 #include <iostream>
 #include <sstream>
 #include <fstream>
+#include <sstream>
 #include <filesystem>
-#include <set>
+#include <unordered_set>
 #include "gumbo.h"
 extern "C"
 {
@@ -12,9 +15,11 @@ extern "C"
 #include "lexbor/dom/interfaces/comment.h"
 #include "lexbor/dom/interfaces/node.h"
 #include "lexbor/dom/interfaces/text.h"
-#include "lexbor/dom/interface.h"
 #include "lexbor/html/serialize.h"
+#include "lexbor/dom/interface.h"
 #include "lexbor/html/parser.h"
+#include "lexbor/html/html.h"
+#include "lexbor/core/fs.h"
 }
 #include <unordered_map>
 #include <cassert>
@@ -80,6 +85,8 @@ struct ST_HTMLParser
     size_t column;
     size_t file_column;
     std::vector<std::vector<ST_TextAttributes>> table;
+    std::unordered_map<std::string, std::unordered_set<std::string>> code_metric;
+    lxb_html_document_t* dom_document;
 };
 
 struct ST_DocumentContent
@@ -110,6 +117,14 @@ static void traverse_nodes(ST_HTMLParser &parser_struct, ST_HTMLTags tags, lxb_d
             lxb_dom_element_t* element = lxb_dom_interface_element(child);
             if (element != nullptr)
             {
+                size_t len;
+                const lxb_char_t* class_attr = lxb_dom_element_get_attribute(element, (const lxb_char_t*)"class", 5, &len);
+                if (class_attr != nullptr)
+                {
+                    const std::string class_type = std::string(reinterpret_cast<const char*>(class_attr));
+                    ltags.attributes[class_type] = true;
+                }
+
                 const lxb_char_t* tag_name = lxb_dom_element_qualified_name(element, nullptr);
                 if (tag_name != nullptr)
                 {
@@ -208,6 +223,29 @@ static void traverse_nodes(ST_HTMLParser &parser_struct, ST_HTMLTags tags, lxb_d
                         a.text = std::string(reinterpret_cast<const char*>(text_content));
                         a.attributes = ltags.attributes;
                         a.references = ltags.references;
+ 
+                        //line number exist
+                        std::vector<ST_TextAttributes> &iter = *parser_struct.table.rbegin();
+                        if (iter.size() > 0)
+                        {
+                            if (a.attributes.find("uncovered-line") != a.attributes.cend())
+                            {
+                                parser_struct.code_metric["uncovered-line"].insert(iter[0].text);
+                            }
+                            else if (a.attributes.find("covered-line") != a.attributes.cend())
+                            {
+                                parser_struct.code_metric["covered-line"].insert(iter[0].text);
+                            }
+
+                            if (a.attributes.find("red") != a.attributes.cend())
+                            {
+                                if (parser_struct.code_metric["uncovered-line"].find(iter[0].text) == parser_struct.code_metric["uncovered-line"].cend())
+                                {
+                                    parser_struct.code_metric["uncovered-branch"].insert(iter[0].text);
+                                }
+                            }
+                        }
+
                         parser_struct.table.rbegin()->push_back(a);
                         ++parser_struct.column;
                     }
@@ -252,12 +290,14 @@ static bool parse_html_file(std::string& content, ST_HTMLParser& parser_struct) 
             parser_struct.header_set = false;
             parser_struct.header_description_set = false;
             ST_HTMLTags tags;
-            bool table_initialitzed = true;
+            bool table_initialitzed = false;
             traverse_nodes(parser_struct, tags, lxb_dom_interface_node(document->body), table_initialitzed, false);
         }
+        parser_struct.dom_document = document;
         retVal = true;
     }
     else {
+        parser_struct.dom_document = nullptr;
         retVal = false;
     }
     return retVal;
@@ -513,35 +553,431 @@ static bool load_html_code(const std::string& root, ST_HTMLParser& parser, std::
     return retVal;
 }
 
-static bool save_and_annotate_source_code(ST_DocumentContent& source)
+
+static bool extract_metric(std::unordered_map<std::string, std::string> parameter, std::string exception_comment, std::unordered_set<std::string>& code_metric, std::vector<std::string>& code_container)
 {
     bool retVal = true;
+    const std::string exclude_line_from_code_coverage = parameter["cc_ignore"];
+
+    for (auto& j : code_metric)
+    {
+        size_t line_no;
+        try {
+            std::stringstream a(j.c_str());
+            a >> line_no;
+            if (line_no > 0)
+            {
+                --line_no;
+            }
+            else
+            {
+                std::ios_base::failure e("Number of lines have to be larger 0.");
+                throw e;
+            }
+        }
+        catch (std::ios_base::failure& e)
+        {
+            std::cerr << e.what() << std::endl;
+            retVal = false;
+            break;
+        }
+
+        if (line_no < code_container.size())
+        {
+            std::string& code = code_container[line_no];
+            struct EN_SupportedComments {
+                std::string comment;
+            };
+
+            static const EN_SupportedComments comments[] =
+            {
+                "/*",
+                "//"
+            };
+
+            bool comment_found = false;
+            for (auto& comment_type : comments)
+            {
+                const size_t comment = code.find(comment_type.comment);
+                if (comment != std::string::npos)
+                {
+                    comment_found = true;
+                    if (code.find(exception_comment) == std::string::npos)
+                    {
+                        code.insert(comment + comment_type.comment.size(), "\t" + exclude_line_from_code_coverage + "\t" + exception_comment + "\t");
+                    }
+                    break;
+                }
+            }
+            if (comment_found == false)
+            {
+                code += "\t//" + exclude_line_from_code_coverage + "\t" + exception_comment;
+            }
+        }
+        else
+        {
+            std::cerr << "Invalid relation between html and source file" << std::endl;
+            retVal = false;
+        }
+    }
+    return retVal;
+}
+
+static std::unordered_set<std::string> intersect(std::unordered_set<std::string>& first, std::unordered_set<std::string>& second)
+{
+    std::unordered_set<std::string> retVal;
+    for (const auto& i : first)
+    {
+        if (second.find(i) != second.cend())
+        {
+            retVal.insert(i);
+        }
+    }
+    return retVal;
+}
+
+static std::unordered_set<std::string> unite(std::unordered_set<std::string>& first, std::unordered_set<std::string>& second)
+{
+    std::unordered_set<std::string> retVal = second;
+    //retVal.insert(first);
+    for (const auto& i : first)
+    {
+        retVal.insert(i);
+    }
+    return retVal;
+}
+
+static bool save_file(std::string file_name, std::vector<std::string> lines)
+{
+    bool retVal = false;
+    std::ofstream file(file_name);
+    try {
+        if (file.good())
+        {
+            for (const auto& i : lines)
+            {
+                file << i << std::endl;
+            }
+        }
+    }
+    catch (const std::ios_base::failure& e)
+    {
+        std::cerr << e.what() << std::endl;
+    }
+    return retVal;
+}
+
+static bool save_and_annotate_source_code(std::unordered_map<std::string, std::string> parameter, ST_DocumentContent& source)
+{
+    bool retVal = true;
+    const std::string exclude_line_from_code_coverage = parameter["cc_ignore"];
+    const bool save_code_as_different_file = parameter["create_new_sourcefiles"] == "true";
+    const std::string src_extension = parameter["sourcefile_modifier"];
     for (auto& i : source.html_files)
     {
-        std::set<size_t> row_set;
-        for (auto& j : source.source_files)
+        for (auto& src : source.source_files)
         {
-            if (j.first.find(i.first) != std::string::npos)
+            if (src.first.find(i.first.c_str()) != std::string::npos)
             {
-                for (auto& k : i.second.table)
+                std::unordered_set<std::string>& uncovered_line = i.second.code_metric["uncovered-line"];
+                std::unordered_set<std::string>& uncovered_branch = i.second.code_metric["uncovered-branch"];
+                std::unordered_set<std::string>& covered_line = i.second.code_metric["covered-line"];
+                std::unordered_set<std::string> pure_uncovered_branch = intersect(covered_line, uncovered_branch);
+                std::unordered_set<std::string> covered_branch = intersect(uncovered_line, uncovered_branch);
+                               
+
+                bool retVal = extract_metric(parameter, parameter["uncovered_line"], uncovered_line, src.second);
+                retVal &= extract_metric(parameter, parameter["uncovered_branch"], pure_uncovered_branch, src.second);
+                
+                std::string sourcfile_name = save_code_as_different_file == false ? src.first : src.first + src_extension;
+                retVal &= save_file(sourcfile_name, src.second);
+            }
+        }
+        if (retVal == false)
+            break;
+    }
+    return retVal;
+}
+
+static bool save_dom_tree(std::string file_name, ST_HTMLParser html)
+{
+    bool retVal = false;
+    if (html.dom_document != nullptr)
+    {
+        lexbor_str_t html_output = {0};
+
+        lxb_status_t serialized_html = lxb_html_serialize_str(lxb_dom_interface_node(html.dom_document), &html_output);
+        if (serialized_html != LXB_STATUS_OK) {
+            retVal = false;
+        }
+        else
+        {
+            
+            if (html_output.data != nullptr)
+            {
+                std::ofstream out(file_name);
+                if (out.is_open())
                 {
-                    if (k[1].text == std::string("0"))
-                    {
-                        const size_t kk = std::stoull(k[0].text, nullptr, 10);
-                        row_set.insert(kk);
-                    }
+                    out.write(reinterpret_cast<const char*>(html_output.data), html_output.length);
                 }
+                
+                lexbor_str_destroy(&html_output, nullptr, false);
+            }
+            retVal = true;
+        }
+    }
+    else
+    {
+        retVal = false;
+    }
+    return retVal;
+}
+
+
+/*------------------------------------------------------------------------------------------*//**
+\brief          traverses the index file and returns the table
+\
+\param[in]      ST_HTMLTags tags,                 ->intermediate tags/attributes
+\param[in]      lxb_dom_node_t* node              ->node to process
+\param[out]     void
+\return         -
+*//*-------------------------------------------------------------------------------------------*/
+static bool open_html_file(std::string source, std::string& content)
+{
+    bool retVal = false;
+
+    std::ifstream file(source);
+    if (!file.is_open()) {
+        std::cerr << "Failed to open the file." << std::endl;
+    }
+    else
+    {
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+        content = buffer.str();
+        retVal = true;
+    }
+
+    return retVal;
+}
+
+enum class HTML_TAG : size_t { EN_HTML=0, EN_HEADING=1, EN_TABLE=2, EN_TABLE_ROW=3, EN_TABLE_COLUMN=4};
+struct HTML_RegExExpressions
+{
+    HTML_TAG tag;
+    std::regex starting;
+    std::regex ending;
+    bool* no_more_hits;
+};
+
+struct HTMLHit {
+    size_t matching_line;
+    enum HTML_TAG tag;
+    std::smatch match;
+    bool operator <(const HTMLHit& comp) const { return this->matching_line > comp.matching_line; }
+};
+
+struct ST_TableCounter
+{
+    bool active;
+    size_t table_no;
+    size_t row;
+    size_t column;
+    size_t merger;
+};
+
+static bool findmatch(std::string::const_iterator start, std::string::const_iterator stop, std::regex& expression, std::smatch& match)
+{
+    return std::regex_search(start, stop, match, expression);
+}
+
+template <size_t N>
+bool parse_htmlfile(HTML_TAG closing_tag, const HTML_RegExExpressions (& html_tags)[N], std::pair<std::priority_queue<HTMLHit>&, std::priority_queue<HTMLHit>&> &queue, const std::string& content, std::string& out)
+{
+    bool retVal = true;
+    std::priority_queue<HTMLHit>& in_ = queue.first;
+    std::priority_queue<HTMLHit>& out_ = queue.second;
+
+    auto PrioQueueHandler = [&](HTMLHit& on_top, HTMLHit& out_top, std::priority_queue<HTMLHit>& in, std::priority_queue<HTMLHit>& out) ->bool
+    {
+        std::string::const_iterator axx = on_top.match.suffix().first;
+        std::string::const_iterator ayy = out_top.match.suffix().first;
+        std::string val = content.substr(axx - content.cbegin(), ayy - axx);
+        if (on_top.tag == HTML_TAG::EN_TABLE_COLUMN)
+            std::cout << val << std::endl;
+
+        std::smatch match_in;
+        std::smatch match_out;
+        std::regex r1 = html_tags[static_cast<size_t>(on_top.tag)].starting;
+        std::regex r2 = html_tags[static_cast<size_t>(out_top.tag)].ending;
+        std::string::const_iterator a1 = on_top.match.suffix().first;
+        std::string::const_iterator a2 = out_top.match.suffix().first;
+        bool start = findmatch(a1, content.cend(), r1, match_in);
+        bool stop = findmatch(a2, content.cend(), r2, match_out);
+        if (start == true)
+        {
+            HTMLHit lines;
+            lines.tag = on_top.tag;
+            lines.match = match_in;
+            lines.matching_line = match_in[0].first - content.cbegin();
+            in.push(lines);
+        }
+        if (stop == true)
+        {
+            HTMLHit lines;
+            lines.tag = out_top.tag;
+            lines.match = match_out;
+            lines.matching_line = match_out[0].first - content.cbegin();
+            out.push(lines);
+        }
+        else if (start == true && stop == false)
+        {
+            retVal = false;
+            std::cerr << "Tokens in html file do not match" << std::endl;
+        }
+        return retVal;
+    };
+    
+    while (in_.size()>0)
+    {
+        HTMLHit on_top = in_.top();
+        HTMLHit out_top = out_.top();
+        
+        if (on_top.matching_line < out_top.matching_line)
+        {
+            if (on_top.tag == out_top.tag) //the arguments agree. Therefore, pop in and out. In is already done 
+            {
+                //both are equal - node can be removed
+                (void)in_.pop();
+                (void)out_.pop();
+               
+                retVal = PrioQueueHandler(on_top, out_top, in_, out_);
+            }
+            else if (out_top.tag == closing_tag)
+            {
+                break;
+            }
+            else
+            {
+                //they do not match - proceed with the child
+                if (on_top.tag != out_top.tag) {
+                    (void)in_.pop();
+
+                    retVal = parse_htmlfile(in_.top().tag, html_tags, queue, content, out);
+                }
+                in_.push(on_top);
+            }
+        }
+        else
+        {
+            //std::cerr << "Tokens in html file do not match" << std::endl;
+            //retVal = false;
+            break;
+        }
+        //if (on_top.)
+    }
+    return retVal;
+}
+
+static bool patch_html_file(const std::string &content, std::string& out)
+{
+    static const size_t no_html_items = 5;
+    
+    bool hits[no_html_items];
+    bool retVal = true;
+    
+    static const HTML_RegExExpressions ExpressionList[] =
+    {
+        { HTML_TAG::EN_HTML, std::regex(R"(<\s*html\s*>)"), std::regex(R"(<\s*/html\s*>)"), &hits[0]},
+        { HTML_TAG::EN_HEADING, std::regex(R"(<\s*h\d{1}\s*>)"), std::regex(R"(<\s*/h\d{1}\s*>)"), &hits[1]},
+        { HTML_TAG::EN_TABLE, std::regex(R"(<\s*table\s*>)"), std::regex(R"(<\s*/table\s*>)"), &hits[2] },
+        { HTML_TAG::EN_TABLE_ROW, std::regex(R"(<\s*tr\s*>)"), std::regex(R"(<\s*/tr\s*>)"), &hits[3] },
+        { HTML_TAG::EN_TABLE_COLUMN, std::regex(R"(<\s*td\s*[^>]*\s*>)"), std::regex(R"(<\s*/td\s*>)"), &hits[4] },
+    }; 
+    for (auto& a : hits)
+    {
+        a = false;
+    }
+
+    std::priority_queue<HTMLHit> min_priority_queue_starting_quotes;
+    std::priority_queue<HTMLHit> min_priority_queue_ending_quotes;
+    std::pair<std::priority_queue<HTMLHit>&, std::priority_queue<HTMLHit>&> queue(min_priority_queue_starting_quotes, min_priority_queue_ending_quotes);
+    for (auto a : ExpressionList)
+    {
+        if (*a.no_more_hits == false)
+        {
+            HTMLHit lines;
+            std::smatch match;
+            bool found_start = std::regex_search(content, match, a.starting);
+            if (found_start == true)
+            {
+                lines.tag = a.tag;
+                lines.match = match;
+                lines.matching_line = match[0].first-content.cbegin();
+                min_priority_queue_starting_quotes.push(lines);
+            }
+            else
+            {
+                *a.no_more_hits = true;
+            }
+
+            bool found_end = std::regex_search(content, match, a.ending);
+            if (found_end == true)
+            {
+                lines.tag = a.tag;
+                lines.match = match;
+                lines.matching_line = match[0].first - content.cbegin();
+                min_priority_queue_ending_quotes.push(lines);
+            }
+            else
+            {
+                *a.no_more_hits = true;
+            }
+            if (found_start != found_end)
+            {
+                std::cerr << "Invalid html file. Number of tags do not match" << std::endl;
+                retVal = false;
+            }
+        }
+        
+    }
+    if (retVal == true)
+    {
+        retVal = parse_htmlfile(min_priority_queue_starting_quotes.top().tag, ExpressionList, queue, content, out);
+    }
+    return retVal;
+}
+
+static bool save_and_annotate_html_files(const std::string &root, std::unordered_map<std::string, std::string> parameter, ST_DocumentContent& source)
+{
+    bool retVal = true;
+    const std::string exclude_line_from_code_coverage = parameter["cc_ignore"];
+    const bool save_code_as_different_file = parameter["create_new_sourcefiles"] == "true";
+    const std::string src_extension = parameter["sourcefile_modifier"];
+    const size_t file_column = source.html_index_file.file_column;
+    for (auto& i : source.html_index_file.table)
+    {
+        const auto iterator = i[file_column].references.find("href");
+        if (iterator != i[file_column].references.cend())
+        {
+            size_t column = 0;
+            size_t row = 0;
+            std::string file_name = root + iterator->second;
+            std::string content;
+
+            const std::string root_file = root + i[file_column].references["href"];
+            retVal = open_html_file(file_name, content);
+            if (retVal == true)
+            {
+                std::string output;
+                retVal = patch_html_file(content, output);
+            }
+            else
+            {
+                retVal = false;
                 break;
             }
         }
-        std::vector<std::vector<ST_TextAttributes>>& table = i.second.table;
-        std::vector<ST_TextAttributes> item = table[0];
-        std::unordered_map<std::string, std::string>::const_iterator iter = item[source.html_index_file.file_column].references.find(i.first);
-        if (iter != item[0].references.cend())
-        {
-            std::cout << "Something found" << std::endl;
-        }
-        
     }
     return retVal;
 }
@@ -560,6 +996,9 @@ bool build_node_tree(std::string source, std::unordered_map<std::string, std::st
     if (parameter.find("index_file") != parameter.cend() && parameter.find("index_folder") != parameter.cend() && parameter.find("source_folder") != parameter.cend())
     {
         ST_DocumentContent index_file;
+        
+        index_file.html_index_file.dom_document = nullptr;
+
         const std::string root = parameter["index_folder"] + "/";
         retVal = get_html_content(root + source, index_file.html_index_file);
         if (retVal == true)
@@ -580,9 +1019,22 @@ bool build_node_tree(std::string source, std::unordered_map<std::string, std::st
                             retVal = load_html_code(root, index_file.html_index_file, index_file.html_files);
                             if (retVal == true)
                             {
-                                retVal = save_and_annotate_source_code(index_file);
-                                if (retVal == true)
+                                if (parameter["patch_sourcefile"] == "true")
                                 {
+                                    retVal = save_and_annotate_source_code(parameter, index_file);
+                                    if (retVal == true)
+                                    {
+                                        std::cout << "Source files successfully annotated" << std::endl;
+                                    }
+                                }
+
+                                if (parameter["annotate_html"] == "true")
+                                {
+                                    retVal = save_and_annotate_html_files(root, parameter, index_file);
+                                    if (retVal == true)
+                                    {
+                                        std::cout << "HTML files successfully annotated" << std::endl;
+                                    }
                                 }
                             }
                         }
