@@ -1,14 +1,17 @@
 #include "xmlparser.h"
-#include <regex>
-#include <queue>
-#include <string>
+#include "gumbo.h"
+
+#include <unordered_set>
+#include <filesystem>
 #include <iostream>
 #include <sstream>
 #include <fstream>
 #include <sstream>
-#include <filesystem>
-#include <unordered_set>
-#include "gumbo.h"
+#include <string>
+#include <regex>
+#include <queue>
+#include <array>
+#include <stack>
 extern "C"
 {
 #include "lexbor/html/interfaces/element.h"
@@ -224,7 +227,7 @@ static void traverse_nodes(ST_HTMLParser &parser_struct, ST_HTMLTags tags, lxb_d
                         a.attributes = ltags.attributes;
                         a.references = ltags.references;
  
-                        //line number exist
+                        //line_out number exist
                         std::vector<ST_TextAttributes> &iter = *parser_struct.table.rbegin();
                         if (iter.size() > 0)
                         {
@@ -761,13 +764,98 @@ static bool open_html_file(std::string source, std::string& content)
     return retVal;
 }
 
-enum class HTML_TAG : size_t { EN_HTML=0, EN_HEADING=1, EN_TABLE=2, EN_TABLE_ROW=3, EN_TABLE_COLUMN=4};
+enum class HTML_TAG : size_t { EN_HTML=0, EN_HEADING=1, EN_TABLE=2, EN_TABLE_ROW=3, EN_TABLE_COLUMN=4, EN_ROOT};
+
+class BaseInstanceHandler
+{
+private:
+protected:
+    virtual void IncStartRef(size_t) = 0;
+    virtual void DecStartRef(size_t) = 0;
+    virtual size_t GetStartRef(size_t) = 0;
+
+    virtual void IncStopRef(size_t) = 0;
+    virtual void DecStopRef(size_t) = 0;
+    virtual size_t GetStopRef(size_t) = 0;
+public:
+    BaseInstanceHandler() {}
+    virtual ~BaseInstanceHandler() {}
+};
+
+template <size_t N>
+class CInstanceHandler : public BaseInstanceHandler
+{
+private:
+    std::array<size_t, N>* pStart;
+    std::array<size_t, N>* pStop;
+
+    void IncRef(size_t instance, std::array<size_t, N>* p) {
+        if (p != nullptr) {
+            if (instance < N) {
+                ++(*p)[instance];
+            }
+            else {
+                throw std::runtime_error("Invalid object instance.");
+            }
+        }
+        else {
+            throw std::runtime_error("Array not allocated.");
+        }
+    }
+    void DecRef(size_t instance, std::array<size_t, N> *p) {
+        if (p != nullptr) {
+            if (instance < N) {
+                if ((*p)[instance] > 0) {
+                    --(*p)[instance];
+                }
+                else {
+                    throw std::runtime_error("Reference error.");
+                }
+            }
+            else {
+                throw std::runtime_error("Invalid object instance.");
+            }
+        }
+        else {
+            throw std::runtime_error("Array not allocated.");
+        }
+    }
+
+    size_t GetRef(size_t instance, std::array<size_t, N>* p) {
+        if (p != nullptr) {
+            if (instance < N) {
+                return (*p)[instance];
+            }
+            else {
+                throw std::runtime_error("Invalid object instance.");
+                return 0;
+            }
+        }
+        else {
+            throw std::runtime_error("Array not allocated.");
+            return 0;
+        }
+    }
+
+public:
+    virtual ~CInstanceHandler() { if (pStart != nullptr) delete pStart;  if (pStop != nullptr) delete pStop; }
+    CInstanceHandler() : BaseInstanceHandler(), pStart(new std::array<size_t, N>()), pStop(new std::array<size_t, N>()) {}
+    
+    virtual void IncStartRef(size_t instance) override { IncRef(instance, pStart); }
+    virtual void DecStartRef(size_t instance) override { DecRef(instance, pStart); }
+    virtual size_t GetStartRef(size_t instance) override { return GetRef(instance, pStart); }
+
+    virtual void IncStopRef(size_t instance) override { IncRef(instance, pStop); }
+    virtual void DecStopRef(size_t instance) override { DecRef(instance, pStop); }
+    virtual size_t GetStopRef(size_t instance) override { return GetRef(instance, pStop); }
+};
+
 struct HTML_RegExExpressions
 {
     HTML_TAG tag;
     std::regex starting;
     std::regex ending;
-    bool* no_more_hits;
+    BaseInstanceHandler* pbase;
 };
 
 struct HTMLHit {
@@ -777,13 +865,13 @@ struct HTMLHit {
     bool operator <(const HTMLHit& comp) const { return this->matching_line > comp.matching_line; }
 };
 
-struct ST_TableCounter
+struct ST_DOMTREE
 {
-    bool active;
-    size_t table_no;
-    size_t row;
-    size_t column;
-    size_t merger;
+    HTMLHit content;
+    ST_DOMTREE* pChild;
+    ST_DOMTREE* pSiblings;
+    ST_DOMTREE() : pSiblings(nullptr), pChild(nullptr){}
+    ~ST_DOMTREE() { if (pSiblings != nullptr) { delete pSiblings; pSiblings = nullptr; } if (pChild != nullptr) { delete pChild; pChild = nullptr; } }
 };
 
 static bool findmatch(std::string::const_iterator start, std::string::const_iterator stop, std::regex& expression, std::smatch& match)
@@ -792,158 +880,232 @@ static bool findmatch(std::string::const_iterator start, std::string::const_iter
 }
 
 template <size_t N>
-bool parse_htmlfile(HTML_TAG closing_tag, const HTML_RegExExpressions (& html_tags)[N], std::pair<std::priority_queue<HTMLHit>&, std::priority_queue<HTMLHit>&> &queue, const std::string& content, std::string& out)
+bool parse_htmlfile(const HTML_RegExExpressions (& html_tags)[N], std::pair<std::priority_queue<HTMLHit>&, std::priority_queue<HTMLHit>&> &queue, const std::string& content, ST_DOMTREE **ppTree)
 {
     bool retVal = true;
-    std::priority_queue<HTMLHit>& in_ = queue.first;
-    std::priority_queue<HTMLHit>& out_ = queue.second;
+    std::priority_queue<HTMLHit>& in = queue.first;
+    std::priority_queue<HTMLHit>& out = queue.second;
+    std::stack<ST_DOMTREE*> top_nodes;
 
-    auto PrioQueueHandler = [&](HTMLHit& on_top, HTMLHit& out_top, std::priority_queue<HTMLHit>& in, std::priority_queue<HTMLHit>& out) ->bool
+    ST_DOMTREE** top_node = ppTree;
+
+    auto find_match_starting = [&](HTMLHit& top, HTMLHit& res) ->bool
     {
-        std::string::const_iterator axx = on_top.match.suffix().first;
-        std::string::const_iterator ayy = out_top.match.suffix().first;
-        std::string val = content.substr(axx - content.cbegin(), ayy - axx);
-        if (on_top.tag == HTML_TAG::EN_TABLE_COLUMN)
-            std::cout << val << std::endl;
-
-        std::smatch match_in;
-        std::smatch match_out;
-        std::regex r1 = html_tags[static_cast<size_t>(on_top.tag)].starting;
-        std::regex r2 = html_tags[static_cast<size_t>(out_top.tag)].ending;
-        std::string::const_iterator a1 = on_top.match.suffix().first;
-        std::string::const_iterator a2 = out_top.match.suffix().first;
-        bool start = findmatch(a1, content.cend(), r1, match_in);
-        bool stop = findmatch(a2, content.cend(), r2, match_out);
+        bool retVal = true;
+        std::smatch match;
+        std::regex r1 = html_tags[static_cast<size_t>(top.tag)].starting;
+        std::string::const_iterator a1 = top.match.suffix().first;
+        bool start = findmatch(a1, content.cend(), r1, match);
         if (start == true)
         {
-            HTMLHit lines;
-            lines.tag = on_top.tag;
-            lines.match = match_in;
-            lines.matching_line = match_in[0].first - content.cbegin();
-            in.push(lines);
+            const size_t index = match[0].first - content.cbegin();
+            res.matching_line = index;
+            res.tag = top.tag;
+            res.match = match;
         }
-        if (stop == true)
-        {
-            HTMLHit lines;
-            lines.tag = out_top.tag;
-            lines.match = match_out;
-            lines.matching_line = match_out[0].first - content.cbegin();
-            out.push(lines);
-        }
-        else if (start == true && stop == false)
+        else
         {
             retVal = false;
-            std::cerr << "Tokens in html file do not match" << std::endl;
         }
         return retVal;
     };
-    
-    while (in_.size()>0)
-    {
-        HTMLHit on_top = in_.top();
-        HTMLHit out_top = out_.top();
-        
-        if (on_top.matching_line < out_top.matching_line)
-        {
-            if (on_top.tag == out_top.tag) //the arguments agree. Therefore, pop in and out. In is already done 
-            {
-                //both are equal - node can be removed
-                (void)in_.pop();
-                (void)out_.pop();
-               
-                retVal = PrioQueueHandler(on_top, out_top, in_, out_);
-            }
-            else if (out_top.tag == closing_tag)
-            {
-                break;
-            }
-            else
-            {
-                //they do not match - proceed with the child
-                if (on_top.tag != out_top.tag) {
-                    (void)in_.pop();
 
-                    retVal = parse_htmlfile(in_.top().tag, html_tags, queue, content, out);
+    auto find_match_ending = [&](HTMLHit& top, HTMLHit& res) ->bool
+    {
+        bool retVal = true;
+        std::smatch match;
+        std::regex r1 = html_tags[static_cast<size_t>(top.tag)].ending;
+        std::string::const_iterator a1 = top.match.suffix().first;
+        bool start = findmatch(a1, content.cend(), r1, match);
+        if (start == true)
+        {
+            const size_t index = match[0].first - content.cbegin();
+            res.matching_line = index;
+            res.tag = top.tag;
+            res.match = match;
+        }
+        else
+        {
+            retVal = false;
+        }
+        return retVal;
+    };
+
+    //allocates an object and determines, if it is a child or sibling
+    auto PrioQueueHandler = [&](HTMLHit& on_top, HTMLHit& out_top) ->bool
+    {
+        bool retVal = true;
+        ST_DOMTREE* new_node = new ST_DOMTREE;
+        if (new_node != nullptr)
+        {
+            new_node->content = on_top;
+            if (on_top.tag != out_top.tag) //next node must be a child node
+            {
+                HTMLHit res;
+                *top_node = new_node;
+                new_node->content = on_top;
+                top_nodes.push(new_node);
+                top_node = &new_node->pChild;
+                bool retval = find_match_starting(on_top, res);
+                if (retval)
+                {
+                    in.push(res);
                 }
-                in_.push(on_top);
+            }
+            else //they are equal. Are they siblings?
+            {
+                HTMLHit res_in;
+                bool in_stat = find_match_starting(on_top, res_in);
+
+                if ((in_stat == false) || ((res_in.matching_line > out_top.matching_line) && (in_stat == true)))
+                {
+                    //in this case it is a sibling
+                    out.pop();
+                    *top_node = new_node;
+                    new_node->content = on_top;
+                    top_node = &new_node->pSiblings;
+
+                    if (in_stat == true)
+                    {
+                        HTMLHit res_out;
+                        bool out_stat = find_match_ending(out_top, res_out);
+                        if (in_stat == true)
+                        {
+                            in.push(res_in);
+                        }
+                        if (out_stat)
+                        {
+                            out.push(res_out);
+                        }
+                    }
+                }
+                else
+                {
+                    //it is a child
+                    *top_node = new_node;
+                    new_node->content = on_top;
+                    top_nodes.push(new_node);
+                    top_node = &new_node->pChild;
+                    if (in_stat == true)//no more childs of this type
+                    {
+                        in.push(res_in);
+                    }
+                }
             }
         }
         else
         {
-            //std::cerr << "Tokens in html file do not match" << std::endl;
-            //retVal = false;
-            break;
+            retVal = false;
         }
-        //if (on_top.)
+        return retVal;
+    };
+    
+    while (out.size() && retVal == true)
+    {
+        const auto RewindDOMTree = [&](HTMLHit& on_top, HTMLHit& out_top) -> bool
+        {
+            bool rewind = false;
+            out_top = out.top();
+            if (in.size() == 0)
+            {
+                rewind = true;
+                on_top = out_top;// top_nodes.top()->content;
+                //in.push(on_top);
+            }
+            else
+            {
+                on_top = in.top();
+                rewind = on_top.matching_line > out_top.matching_line;
+            }
+            return rewind;
+        };
+        
+        HTMLHit out_top;
+        HTMLHit on_top;
+        
+        if (RewindDOMTree(on_top, out_top))
+        {
+            top_node = &top_nodes.top();
+            if ((*top_node)->content.tag != out_top.tag)
+            {
+                std::cerr << "HTML tags do not match" << std::endl;
+            }
+            //in.pop();
+            out.pop();
+            top_nodes.pop();
+
+            bool stop_ret = find_match_ending(on_top, out_top);
+            if (stop_ret == true)
+            {
+                out.push(out_top);
+            }
+            top_node = &(*top_node)->pSiblings;
+        }
+        else
+        {
+            in.pop();
+            retVal = PrioQueueHandler(on_top, out_top);
+        }
     }
     return retVal;
 }
-
+ST_DOMTREE* gpDomTree(nullptr);
 static bool patch_html_file(const std::string &content, std::string& out)
 {
-    static const size_t no_html_items = 5;
-    
-    bool hits[no_html_items];
     bool retVal = true;
-    
+    CInstanceHandler<1> HTML;
+    CInstanceHandler<1> HEADING;
+    CInstanceHandler<1> TABLE;
+    CInstanceHandler<1> TABLE_ROW;
+    CInstanceHandler<1> TABLE_COLUMN;
+
     static const HTML_RegExExpressions ExpressionList[] =
     {
-        { HTML_TAG::EN_HTML, std::regex(R"(<\s*html\s*>)"), std::regex(R"(<\s*/html\s*>)"), &hits[0]},
-        { HTML_TAG::EN_HEADING, std::regex(R"(<\s*h\d{1}\s*>)"), std::regex(R"(<\s*/h\d{1}\s*>)"), &hits[1]},
-        { HTML_TAG::EN_TABLE, std::regex(R"(<\s*table\s*>)"), std::regex(R"(<\s*/table\s*>)"), &hits[2] },
-        { HTML_TAG::EN_TABLE_ROW, std::regex(R"(<\s*tr\s*>)"), std::regex(R"(<\s*/tr\s*>)"), &hits[3] },
-        { HTML_TAG::EN_TABLE_COLUMN, std::regex(R"(<\s*td\s*[^>]*\s*>)"), std::regex(R"(<\s*/td\s*>)"), &hits[4] },
+        { HTML_TAG::EN_HTML, std::regex(R"(<\s*html\s*>)"), std::regex(R"(<\s*/html\s*>)"), &HTML},
+        { HTML_TAG::EN_HEADING, std::regex(R"(<\s*h\d{1}\s*>)"), std::regex(R"(<\s*/h\d{1}\s*>)"), &HEADING},
+        { HTML_TAG::EN_TABLE, std::regex(R"(<\s*table\s*>)"), std::regex(R"(<\s*/table\s*>)"), &TABLE },
+        { HTML_TAG::EN_TABLE_ROW, std::regex(R"(<\s*tr\s*>)"), std::regex(R"(<\s*/tr\s*>)"), &TABLE_ROW },
+        { HTML_TAG::EN_TABLE_COLUMN, std::regex(R"(<\s*td\s*[^>]*\s*>)"), std::regex(R"(<\s*/td\s*>)"), &TABLE_COLUMN },
     }; 
-    for (auto& a : hits)
-    {
-        a = false;
-    }
 
     std::priority_queue<HTMLHit> min_priority_queue_starting_quotes;
     std::priority_queue<HTMLHit> min_priority_queue_ending_quotes;
     std::pair<std::priority_queue<HTMLHit>&, std::priority_queue<HTMLHit>&> queue(min_priority_queue_starting_quotes, min_priority_queue_ending_quotes);
-    for (auto a : ExpressionList)
+    for (auto& a : ExpressionList)
     {
-        if (*a.no_more_hits == false)
-        {
-            HTMLHit lines;
-            std::smatch match;
-            bool found_start = std::regex_search(content, match, a.starting);
-            if (found_start == true)
-            {
-                lines.tag = a.tag;
-                lines.match = match;
-                lines.matching_line = match[0].first-content.cbegin();
-                min_priority_queue_starting_quotes.push(lines);
-            }
-            else
-            {
-                *a.no_more_hits = true;
-            }
 
-            bool found_end = std::regex_search(content, match, a.ending);
-            if (found_end == true)
-            {
-                lines.tag = a.tag;
-                lines.match = match;
-                lines.matching_line = match[0].first - content.cbegin();
-                min_priority_queue_ending_quotes.push(lines);
-            }
-            else
-            {
-                *a.no_more_hits = true;
-            }
-            if (found_start != found_end)
-            {
-                std::cerr << "Invalid html file. Number of tags do not match" << std::endl;
-                retVal = false;
-            }
+        HTMLHit lines;
+        std::smatch match;
+        bool found_start = std::regex_search(content, match, a.starting);
+        if (found_start == true)
+        {
+            lines.tag = a.tag;
+            lines.match = match;
+            lines.matching_line = match[0].first - content.cbegin();
+            min_priority_queue_starting_quotes.push(lines);
         }
-        
+
+        bool found_end = std::regex_search(content, match, a.ending);
+        if (found_end == true)
+        {
+            lines.tag = a.tag;
+            lines.match = match;
+            lines.matching_line = match[0].first - content.cbegin();
+            min_priority_queue_ending_quotes.push(lines);
+        }
+
+        if (found_start != found_end)
+        {
+            std::cerr << "Invalid html file. Number of tags do not match" << std::endl;
+            retVal = false;
+        }
     }
+    
     if (retVal == true)
     {
-        retVal = parse_htmlfile(min_priority_queue_starting_quotes.top().tag, ExpressionList, queue, content, out);
+        ST_DOMTREE* pDomTree = nullptr;
+        retVal = parse_htmlfile(ExpressionList, queue, content, &pDomTree);
+        gpDomTree = pDomTree;
     }
     return retVal;
 }
@@ -970,6 +1132,7 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
             if (retVal == true)
             {
                 std::string output;
+                content = "<html><h1>1</h1><h1>2<h1>3<h1>4</h1></h1><h1></h1>5</h1><h1>end</h1></html>";
                 retVal = patch_html_file(content, output);
             }
             else
@@ -992,6 +1155,14 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
 *//*-------------------------------------------------------------------------------------------*/
 bool build_node_tree(std::string source, std::unordered_map<std::string, std::string> parameter)
 {
+
+    std::string output;
+    std::string content = "<html><h1>1</h1><h1>2<h1>3<h1>4</h1></h1><h1>Sibling</h1></h1><h1>end</h1></html>";//"<html><h1>1</h1><h1>2<h1>3<h1>4</h1></h1></h1></html>";
+    //std::string content = "<html><h1>1</h1><h1>2</h1></html>";
+    //std::string content = "<html><h1>1</h1><h1>2<h1>22</h1></h1><h1>end</h1></html>";
+    bool retVal_ = patch_html_file(content, output);
+
+
     bool retVal = false;
     if (parameter.find("index_file") != parameter.cend() && parameter.find("index_folder") != parameter.cend() && parameter.find("source_folder") != parameter.cend())
     {

@@ -19,7 +19,10 @@ int main(int ac, char** av) {
             ("help", "produce help message")
             ("index_file", po::value<std::string>()->default_value("index.html"), "specifies the root index file")
             ("index_folder", po::value<std::string>()->default_value("./code_coverage_report"), "specifies the index folder")
-            ("source_folder", po::value<std::string>(), "specifies the corresponding source folder")
+            ("source_folder", po::value<std::string>()->default_value(".", "specifies the corresponding source folder"))
+            ("patch_sourcefile", po::value<std::string>()->default_value("false"), "specifies the sourcefile to update")
+            ("annotate_html", po::value<std::string>()->default_value("true"), "annotate the html file")
+            ("rel_file_path", po::value<std::string>()->default_value("."), "specifies a relative path to mirror the same structure")
             ("cc_ignore", po::value<std::string>()->default_value("LLVM_COV_EXCLUDE_LINE"), "specifies the default flag to ignore the line");
 
         po::variables_map vm;
@@ -44,6 +47,10 @@ int main(int ac, char** av) {
             parameters["index_file"] = vm["index_file"].as<std::string>();
             parameters["index_folder"] = vm["index_folder"].as<std::string>();
             parameters["source_folder"] = vm["source_folder"].as<std::string>();
+            parameters["patch_sourcefile"] = vm["patch_sourcefile"].as<std::string>();
+            parameters["annotate_html"] = vm["annotate_html"].as<std::string>();
+            parameters["cc_ignore"] = vm["cc_ignore"].as<std::string>();
+            parameters["rel_file_path"] = vm["rel_file_path"].as<std::string>();
             const std::string source = vm["index_file"].as<std::string>();
             retVal = build_node_tree(source, parameters);
 
