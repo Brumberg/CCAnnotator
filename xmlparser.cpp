@@ -1049,7 +1049,44 @@ bool parse_htmlfile(const HTML_RegExExpressions (& html_tags)[N], std::pair<std:
     }
     return retVal;
 }
-ST_DOMTREE* gpDomTree(nullptr);
+
+static bool WriteTree(std::ofstream& stream, ST_DOMTREE* pDOMTree)
+{
+    std::stack<ST_DOMTREE*> parent_nodes;
+    /*while (pDOMTree != nullptr)
+    {
+        if (pDOMTree->content.match.prefix() != nullptr)
+        {
+
+        }
+        pDOMTree = pDOMTree->pSiblings;
+    }*/
+    return true;
+
+}
+
+static bool FlushDOMTree(const std::string& file_name, ST_DOMTREE* pDOMTree)
+{
+    bool retVal;
+    if (pDOMTree != nullptr)
+    {
+        std::ofstream out(file_name);
+        if (out.is_open())
+        {
+            retVal = WriteTree(out, pDOMTree);
+        }
+        else
+        {
+            retVal = false;
+        }
+    }
+    else
+    {
+        retVal = false;
+    }
+    return retVal;
+}
+
 static bool patch_html_file(const std::string &content, std::string& out)
 {
     bool retVal = true;
@@ -1105,7 +1142,6 @@ static bool patch_html_file(const std::string &content, std::string& out)
     {
         ST_DOMTREE* pDomTree = nullptr;
         retVal = parse_htmlfile(ExpressionList, queue, content, &pDomTree);
-        gpDomTree = pDomTree;
     }
     return retVal;
 }
@@ -1132,7 +1168,6 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
             if (retVal == true)
             {
                 std::string output;
-                content = "<html><h1>1</h1><h1>2<h1>3<h1>4</h1></h1><h1></h1>5</h1><h1>end</h1></html>";
                 retVal = patch_html_file(content, output);
             }
             else
@@ -1157,12 +1192,6 @@ bool build_node_tree(std::string source, std::unordered_map<std::string, std::st
 {
 
     std::string output;
-    std::string content = "<html><h1>1</h1><h1>2<h1>3<h1>4</h1></h1><h1>Sibling</h1></h1><h1>end</h1></html>";//"<html><h1>1</h1><h1>2<h1>3<h1>4</h1></h1></h1></html>";
-    //std::string content = "<html><h1>1</h1><h1>2</h1></html>";
-    //std::string content = "<html><h1>1</h1><h1>2<h1>22</h1></h1><h1>end</h1></html>";
-    bool retVal_ = patch_html_file(content, output);
-
-
     bool retVal = false;
     if (parameter.find("index_file") != parameter.cend() && parameter.find("index_folder") != parameter.cend() && parameter.find("source_folder") != parameter.cend())
     {
