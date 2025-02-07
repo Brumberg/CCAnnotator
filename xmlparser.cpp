@@ -967,16 +967,14 @@ bool parse_htmlfile(const HTML_RegExExpressions (& html_tags)[N], std::pair<std:
 
                     if (in_stat == true)
                     {
-                        HTMLHit res_out;
-                        bool out_stat = find_match_ending(out_top, res_out);
-                        if (in_stat == true)
-                        {
-                            in.push(res_in);
-                        }
-                        if (out_stat)
-                        {
-                            out.push(res_out);
-                        }
+                        in.push(res_in);
+                    }
+
+                    HTMLHit res_out;
+                    bool out_stat = find_match_ending(out_top, res_out);
+                    if (out_stat)
+                    {
+                        out.push(res_out);
                     }
                 }
                 else
@@ -1011,6 +1009,21 @@ bool parse_htmlfile(const HTML_RegExExpressions (& html_tags)[N], std::pair<std:
                 rewind = true;
                 on_top = out_top;// top_nodes.top()->content;
                 //in.push(on_top);
+                if (top_nodes.size() > 0)
+                {
+                    if ((*top_nodes.top()).content.tag == out_top.tag)
+                    {
+                        std::cout << "Resolved tags " << static_cast<size_t>(on_top.tag) << " column " << on_top.matching_line << std::endl;
+                    }
+                    else
+                    {
+                        std::cout << "Unresolved tags " << static_cast<size_t>(on_top.tag) << " column " << on_top.matching_line << std::endl;
+                    }
+                }
+                else
+                {
+                    std::cout << "Unresolved tags " << static_cast<size_t>(on_top.tag) << " column " << on_top.matching_line << std::endl;
+                }
             }
             else
             {
@@ -1025,21 +1038,43 @@ bool parse_htmlfile(const HTML_RegExExpressions (& html_tags)[N], std::pair<std:
         
         if (RewindDOMTree(on_top, out_top))
         {
-            top_node = &top_nodes.top();
-            if ((*top_node)->content.tag != out_top.tag)
+            top_node = nullptr;
+            if (top_nodes.size())
             {
-                std::cerr << "HTML tags do not match" << std::endl;
-            }
-            //in.pop();
-            out.pop();
-            top_nodes.pop();
+                top_node = &top_nodes.top();
+                while ((out.size()>0) && ((*top_node)->content.tag != out_top.tag))
+                {
+                    std::cerr << "HTML tags do not match. TopNode: " << (*top_node)->content.matching_line << " Top: " << on_top.matching_line << " Out: " << out_top.matching_line << std::endl;
+                    //pop non fitting item
+                    out.pop();
 
-            bool stop_ret = find_match_ending(on_top, out_top);
-            if (stop_ret == true)
-            {
-                out.push(out_top);
+                    bool stop_ret = find_match_ending(out_top, out_top);
+                    if (stop_ret == true)
+                    {
+                        out.push(out_top);
+                    }
+                    if (out.size()>0)
+                        out_top = out.top();
+                }
+  
+                if (out.size() > 0)
+                {
+                    out.pop();
+                }
+                else
+                {
+                    std::cerr << "unable to recover from error" << std::endl;
+                }
+
+                top_nodes.pop();
+
+                bool stop_ret = find_match_ending(out_top, out_top);
+                if (stop_ret == true)
+                {
+                    out.push(out_top);
+                }
+                top_node = &(*top_node)->pSiblings;
             }
-            top_node = &(*top_node)->pSiblings;
         }
         else
         {
