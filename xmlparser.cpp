@@ -1218,6 +1218,8 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
     size_t latest_hit = 0u;
     size_t row_count = 0;
     ST_DOMTREE* row_match=nullptr;
+    std::string annotation_string;
+    std::string additional_remarks;
 
     while (tree != nullptr)
     {
@@ -1230,11 +1232,36 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
             line_hit = false;
             count_hit = false;
             source_hit = false;
+            annotation_string.clear();
+            additional_remarks.clear();
         }
         else if (tree->content.tag == HTML_TAG::EN_TABLE_ROW)
         {
             row_match = tree;
             row_count = 0;
+            std::smatch match;
+            static const std::regex pattern(R"(//.*?&lt;cov\s+class=&apos;(A\d)&apos;&gt;(.*?)&lt;\s*/cov\s*&gt;)");
+            size_t length = tree->content.terminating_pos == std::string::npos ? 0u : tree->content.terminating_pos - tree->content.matching_pos;
+            if (length)
+            {
+                const std::string exp = content.substr(tree->content.matching_pos, length);
+                bool hit = std::regex_search(exp, match, pattern);
+                if (hit == true)
+                {
+                    annotation_string = match[1].str();
+                    additional_remarks = match[2].str();
+                }
+                else
+                {
+                    annotation_string = "";
+                    additional_remarks = "";
+                }
+            }
+            else
+            {
+                annotation_string = "";
+                additional_remarks = "";
+            }
         }
         else if (tree->content.tag == HTML_TAG::EN_TABLE_COLUMN)
         {
@@ -1273,30 +1300,34 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
 
                         //match OK
                         std::smatch match;
-                        std::regex expr_line_no(R"(class='line-number')");
-                        std::regex expr_covered_line(R"(class='covered-line')");
-                        std::regex expr_code(R"(class='code')");
+                        static const std::regex expr_line_no(R"(class='line-number')");
+                        static const std::regex expr_covered_line(R"(class='covered-line')");
+                        static const std::regex expr_code(R"(class='code')");
                         std::string exp = tree->content.match[0].str();
                         bool found_start = std::regex_search(exp, match, expr_line_no);
                         if (found_start)
                         {
-                            static const std::string additional_column_annotation = "<td class='annotation'><pre>hallo</pre></td>";
+                            static const std::string additional_column_annotation_start = "<td class='annotation'><pre>";
+                            static const std::string additional_column_annotation_stop = "</pre></td>";
                             std::string dummy;
                             dummy.append(content, latest_hit, tree->content.terminating_pos - latest_hit);
                             new_content.append(content, latest_hit, tree->content.terminating_pos - latest_hit);
                             latest_hit =tree->content.terminating_pos;
-                            new_content.append(additional_column_annotation);
+                            new_content.append(additional_column_annotation_start + annotation_string + additional_column_annotation_stop);
+                            annotation_string = "";
                         }
 
                         found_start = std::regex_search(exp, match, expr_code);
                         if (found_start)
                         {
-                            static const std::string additional_column_remarks = "<td class='remark'><pre>blahblahblah</pre></td>";
+                            static const std::string additional_column_remarks_start = "<td class='remark'><pre>";
+                            static const std::string additional_column_remarks_stop = "</pre></td>";
                             std::string dummy;
                             dummy.append(content, latest_hit, tree->content.terminating_pos - latest_hit);
                             new_content.append(content, latest_hit, tree->content.terminating_pos - latest_hit);
                             latest_hit = tree->content.terminating_pos;
-                            new_content.append(additional_column_remarks);
+                            new_content.append(additional_column_remarks_start + additional_remarks + additional_column_remarks_stop);
+                            additional_remarks = "";
                         }
                         ++row_count;
 
