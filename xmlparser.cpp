@@ -1202,7 +1202,7 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
     ST_DOMTREE* tree = pDomTree;
     std::stack<ST_DOMTREE*> parent;
     std::stack<bool> table_match;
-    
+
     std::unordered_map<HTML_TAG, size_t> flags;
     flags[HTML_TAG::EN_HEADING] = 0;
     flags[HTML_TAG::EN_HTML] = 0;
@@ -1214,10 +1214,16 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
     bool line_hit = false;
     bool count_hit = false;
     bool source_hit = false;
-    
+    size_t covered_lines = 0;
+    size_t uncovered_lines = 0;
+    size_t strictly_remaining_uncovered_lines = 0;
+    size_t remaining_uncovered_lines = 0;
+
+
     size_t latest_hit = 0u;
     size_t row_count = 0;
-    ST_DOMTREE* row_match=nullptr;
+    ST_DOMTREE* row_match = nullptr;
+    std::string annotation;
     std::string annotation_string;
     std::string additional_remarks;
 
@@ -1234,9 +1240,14 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
             source_hit = false;
             annotation_string.clear();
             additional_remarks.clear();
+            annotation.clear();
         }
         else if (tree->content.tag == HTML_TAG::EN_TABLE_ROW)
         {
+            annotation_string.clear();
+            additional_remarks.clear();
+            annotation.clear();
+
             row_match = tree;
             row_count = 0;
             std::smatch match;
@@ -1250,96 +1261,126 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                 {
                     annotation_string = match[1].str();
                     additional_remarks = match[2].str();
+                    annotation = annotation_string;
                 }
-                else
-                {
-                    annotation_string = "";
-                    additional_remarks = "";
-                }
-            }
-            else
-            {
-                annotation_string = "";
-                additional_remarks = "";
             }
         }
         else if (tree->content.tag == HTML_TAG::EN_TABLE_COLUMN)
         {
             if (flags[HTML_TAG::EN_TABLE_COLUMN] > 0u)
             {
-                if (flags[HTML_TAG::EN_TABLE_COLUMN] > 0u)
+
+                size_t line_hit_count = sub_content.find("Line");
+                size_t count_hit_count = sub_content.find("Count");
+                size_t source_hit_count = sub_content.find("Source");
+                if (line_hit_count != std::string::npos)
                 {
-                    size_t line_hit_count = sub_content.find("Line");
-                    size_t count_hit_count = sub_content.find("Count");
-                    size_t source_hit_count = sub_content.find("Source");
-                    if (line_hit_count != std::string::npos)
+                    line_hit = true;
+                    count_hit = false;
+                    source_hit = false;
+                }
+                else if ((line_hit == true) && (count_hit_count != std::string::npos))
+                {
+                    line_hit = true;
+                    count_hit = true;
+                    source_hit = false;
+                }
+                else if ((line_hit == true) && (count_hit == true) && (source_hit_count != std::string::npos))
+                {
+                    source_hit = true;
+#ifdef APPENDCOLUMN
+                    static const std::string modified_header = "<tr><td><pre>Line</pre></td><td><pre>Annotation</pre></td><td><pre>Count</pre></td><td><pre>Source</pre></td><td><pre>Remarks</pre></td>";//the last </tr> comes from the existing tr node.
+#else
+                    static const std::string modified_header = "<tr><td><pre>Line</pre></td><td><pre>Annotation</pre></td><td><pre>Count</pre></td><td><pre>Source</pre></td>";//the last </tr> comes from the existing tr node.
+#endif
+                    if (row_match->content.matching_pos != std::string::npos && latest_hit != std::string::npos)
                     {
-                        line_hit = true;
-                        count_hit = false;
-                        source_hit = false;
+                        new_content.append(content, latest_hit, row_match->content.matching_pos - latest_hit);
+                        new_content.append(modified_header);
+                        latest_hit = tree->content.terminating_pos;
                     }
-                    else if ((line_hit == true) && (count_hit_count != std::string::npos))
+                }
+                else
+                {
+
+                    //match OK
+                    std::smatch match;
+                    static const std::regex expr_line_no(R"(class='line-number')");
+                    static const std::regex expr_covered_line(R"(class='covered-line')");
+                    static const std::regex expr_uncovered_line(R"(class='uncovered-line')");
+                    static const std::regex expr_real_uncovered_line(R"(<\s*?td\s*?class\s*?=\s*?'uncovered-line'><pre>(0)</pre><\s*?/td\s*?>)");
+                    static const std::regex expr_code(R"(class='code')");
+                    static const std::regex exception_code(R"(A[0-7])");
+                    std::string exp = tree->content.match[0].str();
+                    bool found_start = std::regex_search(exp, match, expr_line_no);
+                    if (found_start)
                     {
-                        line_hit = true;
-                        count_hit = true;
-                        source_hit = false;
+                        static const std::string additional_column_annotation_start = "<td class='annotation'><pre>";
+                        static const std::string additional_column_annotation_stop = "</pre></td>";
+                        std::string dummy;
+                        dummy.append(content, latest_hit, tree->content.terminating_pos - latest_hit);
+                        new_content.append(content, latest_hit, tree->content.terminating_pos - latest_hit);
+                        latest_hit = tree->content.terminating_pos;
+                        new_content.append(additional_column_annotation_start + annotation_string + additional_column_annotation_stop);
+                        annotation_string = "";
                     }
-                    else if ((line_hit == true) && (count_hit == true) && (source_hit_count != std::string::npos))
+
+#ifdef APPENDCOLUMN
+                    found_start = std::regex_search(exp, match, expr_code);
+                    if (found_start)
                     {
-                        source_hit = true;
-                        static const std::string modified_header = "<tr><td><pre>Line</pre></td><td><pre>Annotation</pre></td><td><pre>Count</pre></td><td><pre>Source</pre></td><td><pre>Remarks</pre></td>";//the last </tr> comes from the existing tr node.
-                        if (row_match->content.matching_pos != std::string::npos && latest_hit != std::string::npos)
+                        static const std::string additional_column_remarks_start = "<td class='remark'><pre>";
+                        static const std::string additional_column_remarks_stop = "</pre></td>";
+                        std::string dummy;
+                        dummy.append(content, latest_hit, tree->content.terminating_pos - latest_hit);
+                        new_content.append(content, latest_hit, tree->content.terminating_pos - latest_hit);
+                        latest_hit = tree->content.terminating_pos;
+                        new_content.append(additional_column_remarks_start + additional_remarks + additional_column_remarks_stop);
+                        additional_remarks = "";
+                    }
+#endif
+                    std::string node_content = tree->content.match[0].str();
+                    bool line_covered = std::regex_search(exp, match, expr_covered_line);
+                    if (line_covered)
+                    {
+                        ++covered_lines;
+                        annotation.clear();
+                    }
+
+                    bool line_uncovered = std::regex_search(exp, match, expr_uncovered_line);
+                    if (line_uncovered)
+                    {
+                        const size_t length = (tree->content.terminating_pos == std::string::npos) ? 0 : (tree->content.terminating_pos - tree->content.matching_pos);
+                        ++uncovered_lines;
+                        if (length > 0)
                         {
-                            new_content.append(content, latest_hit, row_match->content.matching_pos - latest_hit);
-                            new_content.append(modified_header);
-                            latest_hit = tree->content.terminating_pos;
+                            const std::string node_content = content.substr(tree->content.matching_pos, length);
+
+                            bool real_line_uncovered = std::regex_search(node_content, match, expr_real_uncovered_line);
+                            if (real_line_uncovered)
+                            {
+                                ++strictly_remaining_uncovered_lines;
+                            }
+
+                            bool covered_by_exception = std::regex_search(annotation, match, exception_code);
+                            if (!covered_by_exception && real_line_uncovered)
+                            {
+                                ++remaining_uncovered_lines;
+                            }
                         }
+                        annotation.clear();
                     }
-                    else
-                    {
 
-                        //match OK
-                        std::smatch match;
-                        static const std::regex expr_line_no(R"(class='line-number')");
-                        static const std::regex expr_covered_line(R"(class='covered-line')");
-                        static const std::regex expr_code(R"(class='code')");
-                        std::string exp = tree->content.match[0].str();
-                        bool found_start = std::regex_search(exp, match, expr_line_no);
-                        if (found_start)
-                        {
-                            static const std::string additional_column_annotation_start = "<td class='annotation'><pre>";
-                            static const std::string additional_column_annotation_stop = "</pre></td>";
-                            std::string dummy;
-                            dummy.append(content, latest_hit, tree->content.terminating_pos - latest_hit);
-                            new_content.append(content, latest_hit, tree->content.terminating_pos - latest_hit);
-                            latest_hit =tree->content.terminating_pos;
-                            new_content.append(additional_column_annotation_start + annotation_string + additional_column_annotation_stop);
-                            annotation_string = "";
-                        }
+                    ++row_count;
 
-                        found_start = std::regex_search(exp, match, expr_code);
-                        if (found_start)
-                        {
-                            static const std::string additional_column_remarks_start = "<td class='remark'><pre>";
-                            static const std::string additional_column_remarks_stop = "</pre></td>";
-                            std::string dummy;
-                            dummy.append(content, latest_hit, tree->content.terminating_pos - latest_hit);
-                            new_content.append(content, latest_hit, tree->content.terminating_pos - latest_hit);
-                            latest_hit = tree->content.terminating_pos;
-                            new_content.append(additional_column_remarks_start + additional_remarks + additional_column_remarks_stop);
-                            additional_remarks = "";
-                        }
-                        ++row_count;
+                    line_hit = false;
+                    count_hit = false;
+                    source_hit = false;
 
-                        line_hit = false;
-                        count_hit = false;
-                        source_hit = false;
-
-                    }
                 }
             }
         }
-        
+
         if (tree->pChild != nullptr)
         {
             parent.push(tree);
@@ -1367,7 +1408,7 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                     break;
                 }
             }
-            
+
             if (tree == nullptr)
             {
                 if (table_match.size() > 0)
@@ -1386,7 +1427,7 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
             {
                 tree = tree->pSiblings;
                 source_hit = table_match.top();
-                
+
                 if (table_match.size() > 0)
                 {
                     table_match.pop();
@@ -1408,7 +1449,7 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                 }
             }
         }
-        flags[tree->content.tag] -= flags[tree->content.tag]>0?1u:0u;
+        flags[tree->content.tag] -= flags[tree->content.tag] > 0 ? 1u : 0u;
     }
     if (latest_hit != std::string::npos)
         new_content.append(content, latest_hit);
