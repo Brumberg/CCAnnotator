@@ -859,10 +859,11 @@ struct HTML_RegExExpressions
 };
 
 struct HTMLHit {
-    size_t matching_line;
+    size_t matching_pos;
+    size_t terminating_pos;
     enum HTML_TAG tag;
     std::smatch match;
-    bool operator <(const HTMLHit& comp) const { return this->matching_line > comp.matching_line; }
+    bool operator <(const HTMLHit& comp) const { return this->matching_pos > comp.matching_pos; }
 };
 
 struct ST_DOMTREE
@@ -880,7 +881,7 @@ static bool findmatch(std::string::const_iterator start, std::string::const_iter
 }
 
 template <size_t N>
-bool parse_htmlfile(const HTML_RegExExpressions (& html_tags)[N], std::pair<std::priority_queue<HTMLHit>&, std::priority_queue<HTMLHit>&> &queue, const std::string& content, ST_DOMTREE **ppTree)
+bool build_DOM_tree_nodes(const HTML_RegExExpressions (& html_tags)[N], std::pair<std::priority_queue<HTMLHit>&, std::priority_queue<HTMLHit>&> &queue, const std::string& content, ST_DOMTREE **ppTree)
 {
     bool retVal = true;
     std::priority_queue<HTMLHit>& in = queue.first;
@@ -899,7 +900,7 @@ bool parse_htmlfile(const HTML_RegExExpressions (& html_tags)[N], std::pair<std:
         if (start == true)
         {
             const size_t index = match[0].first - content.cbegin();
-            res.matching_line = index;
+            res.matching_pos = index;
             res.tag = top.tag;
             res.match = match;
         }
@@ -920,7 +921,7 @@ bool parse_htmlfile(const HTML_RegExExpressions (& html_tags)[N], std::pair<std:
         if (start == true)
         {
             const size_t index = match[0].first - content.cbegin();
-            res.matching_line = index;
+            res.matching_pos = index;
             res.tag = top.tag;
             res.match = match;
         }
@@ -957,14 +958,14 @@ bool parse_htmlfile(const HTML_RegExExpressions (& html_tags)[N], std::pair<std:
                 HTMLHit res_in;
                 bool in_stat = find_match_starting(on_top, res_in);
 
-                if ((in_stat == false) || ((res_in.matching_line > out_top.matching_line) && (in_stat == true)))
+                if ((in_stat == false) || ((res_in.matching_pos > out_top.matching_pos) && (in_stat == true)))
                 {
                     //in this case it is a sibling
                     out.pop();
                     *top_node = new_node;
                     new_node->content = on_top;
                     top_node = &new_node->pSiblings;
-
+                    new_node->content.terminating_pos = out_top.match.suffix().first - content.cbegin();
                     if (in_stat == true)
                     {
                         in.push(res_in);
@@ -975,7 +976,12 @@ bool parse_htmlfile(const HTML_RegExExpressions (& html_tags)[N], std::pair<std:
                     if (out_stat)
                     {
                         out.push(res_out);
+                        //new_node->content.terminating_pos = res_out.match.suffix().first-content.cbegin();
                     }
+                    //else
+                    //{
+                    //    new_node->content.terminating_pos = std::string::npos;
+                    //}
                 }
                 else
                 {
@@ -1013,22 +1019,22 @@ bool parse_htmlfile(const HTML_RegExExpressions (& html_tags)[N], std::pair<std:
                 {
                     if ((*top_nodes.top()).content.tag == out_top.tag)
                     {
-                        std::cout << "Resolved tags " << static_cast<size_t>(on_top.tag) << " column " << on_top.matching_line << std::endl;
+                        std::cout << "Resolved tags " << static_cast<size_t>(on_top.tag) << " column " << on_top.matching_pos << std::endl;
                     }
                     else
                     {
-                        std::cout << "Unresolved tags " << static_cast<size_t>(on_top.tag) << " column " << on_top.matching_line << std::endl;
+                        std::cout << "Unresolved tags " << static_cast<size_t>(on_top.tag) << " column " << on_top.matching_pos << std::endl;
                     }
                 }
                 else
                 {
-                    std::cout << "Unresolved tags " << static_cast<size_t>(on_top.tag) << " column " << on_top.matching_line << std::endl;
+                    std::cout << "Unresolved tags " << static_cast<size_t>(on_top.tag) << " column " << on_top.matching_pos << std::endl;
                 }
             }
             else
             {
                 on_top = in.top();
-                rewind = on_top.matching_line > out_top.matching_line;
+                rewind = on_top.matching_pos > out_top.matching_pos;
             }
             return rewind;
         };
@@ -1044,7 +1050,7 @@ bool parse_htmlfile(const HTML_RegExExpressions (& html_tags)[N], std::pair<std:
                 top_node = &top_nodes.top();
                 while ((out.size()>0) && ((*top_node)->content.tag != out_top.tag))
                 {
-                    std::cerr << "HTML tags do not match. TopNode: " << (*top_node)->content.matching_line << " Top: " << on_top.matching_line << " Out: " << out_top.matching_line << std::endl;
+                    std::cerr << "HTML tags do not match. TopNode: " << (*top_node)->content.matching_pos << " Top: " << on_top.matching_pos << " Out: " << out_top.matching_pos << std::endl;
                     //pop non fitting item
                     out.pop();
 
@@ -1059,10 +1065,12 @@ bool parse_htmlfile(const HTML_RegExExpressions (& html_tags)[N], std::pair<std:
   
                 if (out.size() > 0)
                 {
+                    (*top_node)->content.terminating_pos = out_top.match.suffix().first - content.cbegin();
                     out.pop();
                 }
                 else
                 {
+                    (*top_node)->content.terminating_pos = std::string::npos;
                     std::cerr << "unable to recover from error" << std::endl;
                 }
 
@@ -1122,61 +1130,297 @@ static bool FlushDOMTree(const std::string& file_name, ST_DOMTREE* pDOMTree)
     return retVal;
 }
 
-static bool patch_html_file(const std::string &content, std::string& out)
+static bool create_DOM_tree(const std::string &content, ST_DOMTREE** ppDomTree)
+{
+    bool retVal;
+    if (ppDomTree != nullptr)
+    {
+        retVal = true;;
+        *ppDomTree = nullptr;
+        CInstanceHandler<1> HTML;
+        CInstanceHandler<1> HEADING;
+        CInstanceHandler<1> TABLE;
+        CInstanceHandler<1> TABLE_ROW;
+        CInstanceHandler<1> TABLE_COLUMN;
+
+        static const HTML_RegExExpressions ExpressionList[] =
+        {
+            { HTML_TAG::EN_HTML, std::regex(R"(<\s*html\s*>)"), std::regex(R"(<\s*/html\s*>)"), &HTML},
+            { HTML_TAG::EN_HEADING, std::regex(R"(<\s*h\d{1}\s*>)"), std::regex(R"(<\s*/h\d{1}\s*>)"), &HEADING},
+            { HTML_TAG::EN_TABLE, std::regex(R"(<\s*table\s*>)"), std::regex(R"(<\s*/table\s*>)"), &TABLE },
+            { HTML_TAG::EN_TABLE_ROW, std::regex(R"(<\s*tr\s*>)"), std::regex(R"(<\s*/tr\s*>)"), &TABLE_ROW },
+            { HTML_TAG::EN_TABLE_COLUMN, std::regex(R"(<\s*td\s*[^>]*\s*>)"), std::regex(R"(<\s*/td\s*>)"), &TABLE_COLUMN },
+        };
+
+        std::priority_queue<HTMLHit> min_priority_queue_starting_quotes;
+        std::priority_queue<HTMLHit> min_priority_queue_ending_quotes;
+        std::pair<std::priority_queue<HTMLHit>&, std::priority_queue<HTMLHit>&> queue(min_priority_queue_starting_quotes, min_priority_queue_ending_quotes);
+        for (auto& a : ExpressionList)
+        {
+
+            HTMLHit lines;
+            std::smatch match;
+            bool found_start = std::regex_search(content, match, a.starting);
+            if (found_start == true)
+            {
+                lines.tag = a.tag;
+                lines.match = match;
+                lines.matching_pos = match[0].first - content.cbegin();
+                min_priority_queue_starting_quotes.push(lines);
+            }
+
+            bool found_end = std::regex_search(content, match, a.ending);
+            if (found_end == true)
+            {
+                lines.tag = a.tag;
+                lines.match = match;
+                lines.matching_pos = match[0].first - content.cbegin();
+                min_priority_queue_ending_quotes.push(lines);
+            }
+
+            if (found_start != found_end)
+            {
+                std::cerr << "Invalid html file. Number of tags do not match" << std::endl;
+                retVal = false;
+            }
+        }
+
+        if (retVal == true)
+        {
+            retVal = build_DOM_tree_nodes(ExpressionList, queue, content, ppDomTree);
+        }
+    }
+    else
+    {
+        retVal = false;
+    }
+    return retVal;
+}
+
+static bool create_annotated_html(const std::string& content, std::string& new_content, ST_DOMTREE* pDomTree)
+{
+    ST_DOMTREE* tree = pDomTree;
+    std::stack<ST_DOMTREE*> parent;
+    std::stack<bool> table_match;
+    
+    std::unordered_map<HTML_TAG, size_t> flags;
+    flags[HTML_TAG::EN_HEADING] = 0;
+    flags[HTML_TAG::EN_HTML] = 0;
+    flags[HTML_TAG::EN_TABLE] = 0;
+    flags[HTML_TAG::EN_TABLE_COLUMN] = 0;
+    flags[HTML_TAG::EN_TABLE_ROW] = 0;
+    flags[HTML_TAG::EN_ROOT] = 0;
+
+    bool line_hit = false;
+    bool count_hit = false;
+    bool source_hit = false;
+    
+    size_t latest_hit = 0u;
+    size_t row_count = 0;
+    ST_DOMTREE* row_match=nullptr;
+
+    while (tree != nullptr)
+    {
+        std::string sub_content;
+        flags[tree->content.tag] += 1u;
+        sub_content = tree->content.terminating_pos == std::string::npos ? content.substr(tree->content.matching_pos) : content.substr(tree->content.matching_pos, tree->content.terminating_pos - tree->content.matching_pos);
+
+        if (tree->content.tag == HTML_TAG::EN_TABLE)
+        {
+            line_hit = false;
+            count_hit = false;
+            source_hit = false;
+        }
+        else if (tree->content.tag == HTML_TAG::EN_TABLE_ROW)
+        {
+            row_match = tree;
+            row_count = 0;
+        }
+        else if (tree->content.tag == HTML_TAG::EN_TABLE_COLUMN)
+        {
+            if (flags[HTML_TAG::EN_TABLE_COLUMN] > 0u)
+            {
+                if (flags[HTML_TAG::EN_TABLE_COLUMN] > 0u)
+                {
+                    size_t line_hit_count = sub_content.find("Line");
+                    size_t count_hit_count = sub_content.find("Count");
+                    size_t source_hit_count = sub_content.find("Source");
+                    if (line_hit_count != std::string::npos)
+                    {
+                        line_hit = true;
+                        count_hit = false;
+                        source_hit = false;
+                    }
+                    else if ((line_hit == true) && (count_hit_count != std::string::npos))
+                    {
+                        line_hit = true;
+                        count_hit = true;
+                        source_hit = false;
+                    }
+                    else if ((line_hit == true) && (count_hit == true) && (source_hit_count != std::string::npos))
+                    {
+                        source_hit = true;
+                        static const std::string modified_header = "<tr><td><pre>Line</pre></td><td><pre>Annotation</pre></td><td><pre>Count</pre></td><td><pre>Source</pre></td><td><pre>Remarks</pre></td>";//the last </tr> comes from the existing tr node.
+                        if (row_match->content.matching_pos != std::string::npos && latest_hit != std::string::npos)
+                        {
+                            new_content.append(content, latest_hit, row_match->content.matching_pos - latest_hit);
+                            new_content.append(modified_header);
+                            latest_hit = tree->content.terminating_pos;
+                        }
+                    }
+                    else
+                    {
+
+                        //match OK
+                        std::smatch match;
+                        std::regex expr_line_no(R"(class='line-number')");
+                        std::regex expr_covered_line(R"(class='covered-line')");
+                        std::regex expr_code(R"(class='code')");
+                        std::string exp = tree->content.match[0].str();
+                        bool found_start = std::regex_search(exp, match, expr_line_no);
+                        if (found_start)
+                        {
+                            static const std::string additional_column_annotation = "<td class='annotation'><pre>hallo</pre></td>";
+                            std::string dummy;
+                            dummy.append(content, latest_hit, tree->content.terminating_pos - latest_hit);
+                            new_content.append(content, latest_hit, tree->content.terminating_pos - latest_hit);
+                            latest_hit =tree->content.terminating_pos;
+                            new_content.append(additional_column_annotation);
+                        }
+
+                        found_start = std::regex_search(exp, match, expr_code);
+                        if (found_start)
+                        {
+                            static const std::string additional_column_remarks = "<td class='remark'><pre>blahblahblah</pre></td>";
+                            std::string dummy;
+                            dummy.append(content, latest_hit, tree->content.terminating_pos - latest_hit);
+                            new_content.append(content, latest_hit, tree->content.terminating_pos - latest_hit);
+                            latest_hit = tree->content.terminating_pos;
+                            new_content.append(additional_column_remarks);
+                        }
+                        ++row_count;
+
+                        line_hit = false;
+                        count_hit = false;
+                        source_hit = false;
+
+                    }
+                }
+            }
+        }
+        
+        if (tree->pChild != nullptr)
+        {
+            parent.push(tree);
+            tree = tree->pChild;
+            table_match.push(source_hit);
+        }
+        else if (tree->pSiblings != nullptr)
+        {
+            tree = tree->pSiblings;
+        }
+        else
+        {
+            tree = parent.top();
+            while ((tree->pSiblings == nullptr) && (parent.size() > 0))
+            {
+                table_match.pop();
+                parent.pop();
+                if (parent.size() > 0)
+                {
+                    tree = parent.top();
+                }
+                else
+                {
+                    tree = nullptr;
+                    break;
+                }
+            }
+            
+            if (tree == nullptr)
+            {
+                if (table_match.size() > 0)
+                {
+                    std::cerr << "invalid DOM tree (table)" << std::endl;
+                    table_match.pop();
+                }
+                if (parent.size() > 0)
+                {
+                    std::cerr << "invalid DOM tree (table)" << std::endl;
+                    parent.pop();
+                }
+                break;
+            }
+            else
+            {
+                tree = tree->pSiblings;
+                source_hit = table_match.top();
+                
+                if (table_match.size() > 0)
+                {
+                    table_match.pop();
+                }
+                else
+                {
+                    std::cerr << "invalid DOM tree (table)" << std::endl;
+                    break;
+                }
+
+                if (parent.size() > 0)
+                {
+                    parent.pop();
+                }
+                else
+                {
+                    std::cerr << "invalid DOM tree (parent)" << std::endl;
+                    break;
+                }
+            }
+        }
+        flags[tree->content.tag] -= flags[tree->content.tag]>0?1u:0u;
+    }
+    if (latest_hit != std::string::npos)
+        new_content.append(content, latest_hit);
+    return true;
+}
+
+static bool write_html_file(const std::string& file_name, const std::string& content)
 {
     bool retVal = true;
-    CInstanceHandler<1> HTML;
-    CInstanceHandler<1> HEADING;
-    CInstanceHandler<1> TABLE;
-    CInstanceHandler<1> TABLE_ROW;
-    CInstanceHandler<1> TABLE_COLUMN;
-
-    static const HTML_RegExExpressions ExpressionList[] =
+    std::ofstream out(file_name);
+    if (out.is_open())
     {
-        { HTML_TAG::EN_HTML, std::regex(R"(<\s*html\s*>)"), std::regex(R"(<\s*/html\s*>)"), &HTML},
-        { HTML_TAG::EN_HEADING, std::regex(R"(<\s*h\d{1}\s*>)"), std::regex(R"(<\s*/h\d{1}\s*>)"), &HEADING},
-        { HTML_TAG::EN_TABLE, std::regex(R"(<\s*table\s*>)"), std::regex(R"(<\s*/table\s*>)"), &TABLE },
-        { HTML_TAG::EN_TABLE_ROW, std::regex(R"(<\s*tr\s*>)"), std::regex(R"(<\s*/tr\s*>)"), &TABLE_ROW },
-        { HTML_TAG::EN_TABLE_COLUMN, std::regex(R"(<\s*td\s*[^>]*\s*>)"), std::regex(R"(<\s*/td\s*>)"), &TABLE_COLUMN },
-    }; 
-
-    std::priority_queue<HTMLHit> min_priority_queue_starting_quotes;
-    std::priority_queue<HTMLHit> min_priority_queue_ending_quotes;
-    std::pair<std::priority_queue<HTMLHit>&, std::priority_queue<HTMLHit>&> queue(min_priority_queue_starting_quotes, min_priority_queue_ending_quotes);
-    for (auto& a : ExpressionList)
-    {
-
-        HTMLHit lines;
-        std::smatch match;
-        bool found_start = std::regex_search(content, match, a.starting);
-        if (found_start == true)
+        try
         {
-            lines.tag = a.tag;
-            lines.match = match;
-            lines.matching_line = match[0].first - content.cbegin();
-            min_priority_queue_starting_quotes.push(lines);
+            out.write(&content[0], content.length());
         }
-
-        bool found_end = std::regex_search(content, match, a.ending);
-        if (found_end == true)
-        {
-            lines.tag = a.tag;
-            lines.match = match;
-            lines.matching_line = match[0].first - content.cbegin();
-            min_priority_queue_ending_quotes.push(lines);
-        }
-
-        if (found_start != found_end)
-        {
-            std::cerr << "Invalid html file. Number of tags do not match" << std::endl;
+        catch (const std::exception& ex) {
+            std::cerr << "Could not create file. "
+                << ex.what();
             retVal = false;
         }
     }
+    return retVal;
+}
+
+
+static bool patch_html_file(const std::string& content, std::string& out)
+{
+    ST_DOMTREE* pDomTree = nullptr;
+    std::string new_content;
     
+    std::regex stylesheet(R"(href='[./\\]*style.css')");
+    std::string adapted_content = std::regex_replace(content, stylesheet, "href='./style.css'");
+
+    bool retVal = create_DOM_tree(adapted_content, &pDomTree);
     if (retVal == true)
     {
-        ST_DOMTREE* pDomTree = nullptr;
-        retVal = parse_htmlfile(ExpressionList, queue, content, &pDomTree);
+        create_annotated_html(adapted_content, new_content, pDomTree);
+        retVal = write_html_file("Test.html", new_content);
+        if (pDomTree != nullptr)
+        {
+            delete pDomTree;
+        }
     }
     return retVal;
 }
