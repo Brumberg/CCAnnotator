@@ -875,6 +875,15 @@ struct ST_DOMTREE
     ~ST_DOMTREE() { if (pSiblings != nullptr) { delete pSiblings; pSiblings = nullptr; } if (pChild != nullptr) { delete pChild; pChild = nullptr; } }
 };
 
+struct ST_Statistics
+{
+    size_t No_Uncovered_Lines;
+    size_t No_Covered_Lines;
+    size_t No_Annotated_Lines;
+    float percentange_covered_lines;
+    float percentange_uncovered_lines;
+    float percentange_annotated_and_covered_lines;
+};
 static bool findmatch(std::string::const_iterator start, std::string::const_iterator stop, std::regex& expression, std::smatch& match)
 {
     return std::regex_search(start, stop, match, expression);
@@ -1197,7 +1206,7 @@ static bool create_DOM_tree(const std::string &content, ST_DOMTREE** ppDomTree)
     return retVal;
 }
 
-static bool create_annotated_html(const std::string& content, std::string& new_content, ST_DOMTREE* pDomTree)
+static bool create_annotated_html(const std::string& content, std::string& new_content, ST_Statistics& stats, ST_DOMTREE* pDomTree)
 {
     ST_DOMTREE* tree = pDomTree;
     std::stack<ST_DOMTREE*> parent;
@@ -1214,10 +1223,12 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
     bool line_hit = false;
     bool count_hit = false;
     bool source_hit = false;
-    size_t covered_lines = 0;
-    size_t uncovered_lines = 0;
-    size_t strictly_remaining_uncovered_lines = 0;
-    size_t remaining_uncovered_lines = 0;
+    bool annotated_code = false;
+    size_t covered_lines = 0u;
+    size_t uncovered_lines = 0u;
+    size_t strictly_remaining_uncovered_lines = 0u;
+    size_t remaining_uncovered_lines = 0u;
+    size_t currently_processed_line = 0u;
 
 
     size_t latest_hit = 0u;
@@ -1226,6 +1237,9 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
     std::string annotation;
     std::string annotation_string;
     std::string additional_remarks;
+    std::unordered_map<size_t, size_t> dict_covered_lines;
+    std::unordered_map<size_t, size_t> dict_uncovered_lines;
+    std::unordered_map<size_t, size_t> dict_accepted_uncovered_lines;
 
     while (tree != nullptr)
     {
@@ -1238,6 +1252,8 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
             line_hit = false;
             count_hit = false;
             source_hit = false;
+            annotated_code = false;
+            currently_processed_line = 0;
             annotation_string.clear();
             additional_remarks.clear();
             annotation.clear();
@@ -1247,12 +1263,25 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
             annotation_string.clear();
             additional_remarks.clear();
             annotation.clear();
-
+            annotation_string.clear();
+            currently_processed_line = 0;
+            annotated_code = false;
             row_match = tree;
             row_count = 0;
             std::smatch match;
             static const std::regex pattern(R"(//.*?&lt;cov\s+class=&apos;(A\d)&apos;&gt;(.*?)&lt;\s*/cov\s*&gt;)");
+            static const std::regex table_pattern(R"(<\s*table\s*>)");
+            //const size_t endpos = (tree->pChild != nullptr) ? tree->pChild->content.matching_pos : tree->content.terminating_pos;
             size_t length = tree->content.terminating_pos == std::string::npos ? 0u : tree->content.terminating_pos - tree->content.matching_pos;
+            bool table_hit = std::regex_search(sub_content, match, table_pattern);
+            if (table_hit)
+            {
+                if (static_cast<size_t>(match.position()) < length)
+                {
+                    length = match.position();
+                }
+            }
+            
             if (length)
             {
                 const std::string exp = content.substr(tree->content.matching_pos, length);
@@ -1269,7 +1298,6 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
         {
             if (flags[HTML_TAG::EN_TABLE_COLUMN] > 0u)
             {
-
                 size_t line_hit_count = sub_content.find("Line");
                 size_t count_hit_count = sub_content.find("Count");
                 size_t source_hit_count = sub_content.find("Source");
@@ -1278,16 +1306,22 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                     line_hit = true;
                     count_hit = false;
                     source_hit = false;
+                    annotated_code = false;
+                    currently_processed_line = 0;
                 }
                 else if ((line_hit == true) && (count_hit_count != std::string::npos))
                 {
                     line_hit = true;
                     count_hit = true;
                     source_hit = false;
+                    annotated_code = false;
+                    currently_processed_line = 0;
                 }
                 else if ((line_hit == true) && (count_hit == true) && (source_hit_count != std::string::npos))
                 {
                     source_hit = true;
+                    annotated_code = false;
+                    currently_processed_line = 0;
 #ifdef APPENDCOLUMN
                     static const std::string modified_header = "<tr><td><pre>Line</pre></td><td><pre>Annotation</pre></td><td><pre>Count</pre></td><td><pre>Source</pre></td><td><pre>Remarks</pre></td>";//the last </tr> comes from the existing tr node.
 #else
@@ -1322,10 +1356,38 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                         new_content.append(content, latest_hit, tree->content.terminating_pos - latest_hit);
                         latest_hit = tree->content.terminating_pos;
                         new_content.append(additional_column_annotation_start + annotation_string + additional_column_annotation_stop);
-                        annotation_string = "";
+                        if (annotation_string.length())
+                        {
+                            annotated_code = true;
+                            annotation_string = "";
+                        }
+                        static const std::regex line_match_no(R"(name\s*=\s*'L(\d+)')");
+                        /*size_t rest_size = tree->pSiblings != nullptr ? tree->pSiblings->content.matching_pos : std::string::npos;
+                        rest_size = tree->pChild != nullptr ? tree->pChild->content.matching_pos : rest_size;
+                        rest_size = rest_size == std::string::npos ? rest_size : rest_size - tree->content.terminating_pos;*/
+                        std::string line = content.substr(tree->content.matching_pos, tree->content.terminating_pos - tree->content.matching_pos);
+                        bool line_found = std::regex_search(line, match, line_match_no);
+                        if (line_found)
+                        {
+                            std::string str = match[1].str();
+                            try {
+                                size_t line_no = stoul(str);
+                                currently_processed_line = line_no;
+                            }
+                            catch (const std::invalid_argument& ia)
+                            {
+                                currently_processed_line = 0u;
+                                std::cerr << "Invalid argument: " << ia.what() << std::endl;
+                            }
+                            catch (const std::out_of_range& ia)
+                            {
+                                currently_processed_line = 0u;
+                                std::cerr << "Invalid argument: " << ia.what() << std::endl;
+                            }
+                        }
                     }
 
-#ifdef APPENDCOLUMN
+#ifdef APPENDCOLUMN //needs additional tweaking -> deleting remarks
                     found_start = std::regex_search(exp, match, expr_code);
                     if (found_start)
                     {
@@ -1338,6 +1400,41 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                         new_content.append(additional_column_remarks_start + additional_remarks + additional_column_remarks_stop);
                         additional_remarks = "";
                     }
+#else
+                    found_start = std::regex_search(exp, match, expr_code);
+                    if (found_start)
+                    {
+                        if (annotated_code)
+                        {
+                            static const std::regex class_red(R"(<\s*span\s*class\s*=\s*'red')");
+                            static const std::string class_cyan = "<span class='cyan'";
+                            std::string dummy = content.substr(latest_hit, tree->content.terminating_pos - latest_hit);
+                            
+                            dummy = std::regex_replace(dummy, class_red, class_cyan);
+                            latest_hit = tree->content.terminating_pos;
+
+                            std::smatch match;
+                            static const std::regex pattern(R"(&lt;cov\s+class=&apos;(A\d)&apos;&gt;(.*?)&lt;\s*/cov\s*&gt;)");
+                            const bool match_annotation = std::regex_search(dummy, match, pattern);
+                            if (match_annotation)
+                            {
+                                std::string prefix_str(match.prefix().first, match.prefix().second);
+                                std::string suffix_str(match.suffix().first, match.suffix().second);
+                                dummy = prefix_str + suffix_str;
+                                static const std::regex del_comment(R"(\s*//\s*(?=(<\s*/span\s*>)*<\s*/pre\s*><\s*/td\s*>))");
+                                const bool del_comment_result = std::regex_search(dummy, match, del_comment);
+                                if (del_comment_result)
+                                {
+                                    dummy = std::string(match.prefix().first, match.prefix().second);
+                                    latest_hit = tree->content.terminating_pos;
+                                }
+                            }
+                            new_content.append(dummy);
+                        }
+                        annotation.clear();
+                        annotation_string.clear();
+                        annotated_code = false;
+                    }
 #endif
                     std::string node_content = tree->content.match[0].str();
                     bool line_covered = std::regex_search(exp, match, expr_covered_line);
@@ -1345,6 +1442,11 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                     {
                         ++covered_lines;
                         annotation.clear();
+                        annotation_string.clear();
+                        if (currently_processed_line != 0u)
+                        {
+                            ++dict_covered_lines[currently_processed_line];
+                        }
                     }
 
                     bool line_uncovered = std::regex_search(exp, match, expr_uncovered_line);
@@ -1352,6 +1454,7 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                     {
                         const size_t length = (tree->content.terminating_pos == std::string::npos) ? 0 : (tree->content.terminating_pos - tree->content.matching_pos);
                         ++uncovered_lines;
+
                         if (length > 0)
                         {
                             const std::string node_content = content.substr(tree->content.matching_pos, length);
@@ -1360,6 +1463,10 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                             if (real_line_uncovered)
                             {
                                 ++strictly_remaining_uncovered_lines;
+                                if (currently_processed_line != 0u)
+                                {
+                                    ++dict_uncovered_lines[currently_processed_line];
+                                }
                             }
 
                             bool covered_by_exception = std::regex_search(annotation, match, exception_code);
@@ -1367,12 +1474,33 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                             {
                                 ++remaining_uncovered_lines;
                             }
+                            else
+                            {
+                                //it is covered. Therefore, we can treat the string explicitly
+                                const size_t length = tree->content.terminating_pos != std::string::npos ? (tree->content.terminating_pos - latest_hit) : 0u;
+                                if (length > 0u)
+                                {
+                                    std::string dummy = content.substr(latest_hit, tree->content.terminating_pos - latest_hit);
+                                    //static const std::string uncovered_line = "class=\'uncovered-line\'";
+                                    static const std::string covered_line = "class=\'covered-line\'";
+                                    static const std::regex uncovered_line_ex(R"(class\s*=\s*\'uncovered-line\')");
+                                    //static const std::regex covered_line_ex(R"(class\s*=\s*\'covered-line\')");
+                                    dummy = std::regex_replace(dummy, uncovered_line_ex, covered_line);
+                                    new_content.append(dummy);
+                                    latest_hit = tree->content.terminating_pos;
+                                    if (currently_processed_line != 0u)
+                                    {
+                                        if (covered_by_exception)
+                                            ++dict_accepted_uncovered_lines[currently_processed_line];
+                                    }
+                                }
+                            }
                         }
                         annotation.clear();
+                        annotation_string.clear();
                     }
 
                     ++row_count;
-
                     line_hit = false;
                     count_hit = false;
                     source_hit = false;
@@ -1453,6 +1581,17 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
     }
     if (latest_hit != std::string::npos)
         new_content.append(content, latest_hit);
+    
+    stats.No_Covered_Lines = dict_covered_lines.size();
+    stats.No_Annotated_Lines = dict_accepted_uncovered_lines.size();
+    stats.No_Uncovered_Lines = dict_uncovered_lines.size();
+    const size_t overall_number_of_lines = stats.No_Covered_Lines + stats.No_Uncovered_Lines;
+    if (overall_number_of_lines)
+    {
+        stats.percentange_uncovered_lines = static_cast<float>(stats.No_Uncovered_Lines) / static_cast<float>(overall_number_of_lines);
+        stats.percentange_covered_lines = static_cast<float>(stats.No_Covered_Lines) / static_cast<float>(overall_number_of_lines);
+        stats.percentange_annotated_and_covered_lines = static_cast<float>(stats.No_Uncovered_Lines - stats.No_Annotated_Lines) / static_cast<float>(overall_number_of_lines);
+    }
     return true;
 }
 
@@ -1487,7 +1626,8 @@ static bool patch_html_file(const std::string& content, std::string& out)
     bool retVal = create_DOM_tree(adapted_content, &pDomTree);
     if (retVal == true)
     {
-        create_annotated_html(adapted_content, new_content, pDomTree);
+        ST_Statistics stats;
+        create_annotated_html(adapted_content, new_content, stats, pDomTree);
         retVal = write_html_file("Test.html", new_content);
         if (pDomTree != nullptr)
         {
@@ -1541,7 +1681,6 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
 *//*-------------------------------------------------------------------------------------------*/
 bool build_node_tree(std::string source, std::unordered_map<std::string, std::string> parameter)
 {
-
     std::string output;
     bool retVal = false;
     if (parameter.find("index_file") != parameter.cend() && parameter.find("index_folder") != parameter.cend() && parameter.find("source_folder") != parameter.cend())
