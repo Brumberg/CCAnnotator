@@ -850,6 +850,13 @@ public:
     virtual size_t GetStopRef(size_t instance) override { return GetRef(instance, pStop); }
 };
 
+struct HTML_RegExBaseExpressions
+{
+    HTML_TAG tag;
+    std::regex const* content;
+    std::regex const* attributes;
+};
+
 struct HTML_RegExExpressions
 {
     HTML_TAG tag;
@@ -873,6 +880,30 @@ struct ST_DOMTREE
     ST_DOMTREE* pSiblings;
     ST_DOMTREE() : pSiblings(nullptr), pChild(nullptr){}
     ~ST_DOMTREE() { if (pSiblings != nullptr) { delete pSiblings; pSiblings = nullptr; } if (pChild != nullptr) { delete pChild; pChild = nullptr; } }
+};
+
+struct ST_TABLE_ELEMENT
+{
+    HTML_TAG tag;
+    ST_TABLE_ELEMENT* pNext;
+    ST_TABLE_ELEMENT* pPrev;
+    ST_TABLE_ELEMENT* pSub;
+    ST_TABLE_ELEMENT* pParent;
+    ST_TABLE_ELEMENT() : pNext(nullptr), pPrev(nullptr), pSub(nullptr), pParent(nullptr) {}
+    ~ST_TABLE_ELEMENT() { 
+        if (pNext != nullptr) { ST_TABLE_ELEMENT* p = pNext; pNext = nullptr; delete p; }
+        if (pPrev != nullptr) { ST_TABLE_ELEMENT* p = pPrev; pPrev = nullptr; delete p; }
+        if (pSub != nullptr) { ST_TABLE_ELEMENT* p = pSub; pSub = nullptr; delete p; }
+        if (pParent != nullptr) { ST_TABLE_ELEMENT* p = pParent; pParent = nullptr; delete p; }
+    }
+    std::string content;
+    std::unordered_map<std::string, std::string> attributes;
+};
+
+struct ST_HTMLContent
+{
+    std::string html;
+    ST_DOMTREE* ptree;
 };
 
 struct ST_Statistics
@@ -1157,7 +1188,7 @@ static bool create_DOM_tree(const std::string &content, ST_DOMTREE** ppDomTree)
             { HTML_TAG::EN_HTML, std::regex(R"(<\s*html\s*>)"), std::regex(R"(<\s*/html\s*>)"), &HTML},
             { HTML_TAG::EN_HEADING, std::regex(R"(<\s*h\d{1}\s*>)"), std::regex(R"(<\s*/h\d{1}\s*>)"), &HEADING},
             { HTML_TAG::EN_TABLE, std::regex(R"(<\s*table\s*>)"), std::regex(R"(<\s*/table\s*>)"), &TABLE },
-            { HTML_TAG::EN_TABLE_ROW, std::regex(R"(<\s*tr\s*>)"), std::regex(R"(<\s*/tr\s*>)"), &TABLE_ROW },
+            { HTML_TAG::EN_TABLE_ROW, std::regex(R"(<\s*tr\s*[^>]*\s*>)"), std::regex(R"(<\s*/tr\s*>)"), &TABLE_ROW },
             { HTML_TAG::EN_TABLE_COLUMN, std::regex(R"(<\s*td\s*[^>]*\s*>)"), std::regex(R"(<\s*/td\s*>)"), &TABLE_COLUMN },
         };
 
@@ -1671,6 +1702,356 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
     return retVal;
 }
 
+static bool load_index_file(std::string file_name, ST_HTMLContent& tree_content)
+{
+    bool retVal = false;
+
+    std::ifstream file(file_name);
+    if (!file.is_open()) {
+        std::cerr << "Failed to open the file." << std::endl;
+    }
+    else
+    {
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+        tree_content.html = buffer.str();
+
+        if (create_DOM_tree(tree_content.html, &tree_content.ptree)) {
+            //std::cout << "HTML content parsed successfully" << std::endl;
+            retVal = true;
+        }
+        else {
+            std::cerr << "Failed to parse HTML content" << std::endl;
+        }
+    }
+    return retVal;
+}
+
+
+ST_TABLE_ELEMENT* findtag(HTML_TAG tag, ST_TABLE_ELEMENT* proot)
+{
+    ST_TABLE_ELEMENT* result = nullptr;
+    if (proot != nullptr)
+    {
+        if (proot->tag != tag)
+        {
+            if (proot->pSub != nullptr)
+            {
+                result = findtag(tag, proot->pSub);
+            }
+            
+            while (proot->pNext != nullptr && result == nullptr)
+            {
+                result = findtag(tag, proot->pNext);
+                proot = proot->pNext;
+            }
+        }
+        else
+        {
+            result = proot;
+        }
+    }
+    return result;
+}
+
+/*------------------------------------------------------------------------------------------*//**
+\brief          visit every file and extract content
+\
+\param[in]      ST_HTMLTags tags,                 ->intermediate tags/attributes
+\param[in]      lxb_dom_node_t* node              ->node to process
+\param[out]     void
+\return         -
+*//*-------------------------------------------------------------------------------------------*/
+static bool check_index_file_(ST_HTMLContent& parser, ST_TABLE_ELEMENT **ptable)
+{
+    const auto get_content_and_attributes = [](HTML_TAG tag, std::string& raw_content, std::string &content, std::unordered_map<std::string, std::string>& attributes) -> void
+    {
+        static const std::regex heading_content = std::regex(R"(<\s*h\d{1}\s*>(.*?)<\s*/h\d{1}\s*>)");
+        static const std::regex table_column_content = std::regex(R"(<\s*td[^>]*>(.*?)<\s*/td\s*>)");
+        static const std::regex table_column_attributes = std::regex(R"(<\s*td\s+([^>]+).*<\s*/td\s*>)");
+        static const std::regex table_row_attributes = std::regex(R"(<\s*tr\s+([^>]+)>.*<\s*/tr\s*>)");
+
+        static const HTML_RegExBaseExpressions ExpressionList[] =
+        {
+            { HTML_TAG::EN_HTML, nullptr, nullptr},
+            { HTML_TAG::EN_HEADING, &heading_content, nullptr},
+            { HTML_TAG::EN_TABLE, nullptr, nullptr},
+            { HTML_TAG::EN_TABLE_ROW, nullptr, &table_row_attributes},
+            { HTML_TAG::EN_TABLE_COLUMN, &table_column_content, &table_column_attributes},
+        };
+        
+        content.clear();
+        attributes.clear();
+
+        std::smatch match_content;
+        std::smatch match_attributes;
+        std::smatch match_subattributes;
+
+        bool hit_content = false;
+        bool hit_attribute = false;
+        bool sub_attributes = false;
+        
+        switch (tag)
+        {
+        case HTML_TAG::EN_HTML:
+            content = "";
+            attributes.clear();
+            break;
+        case HTML_TAG::EN_HEADING:
+            if (ExpressionList[static_cast<size_t>(HTML_TAG::EN_HEADING)].content != nullptr)
+            {
+                hit_content = std::regex_search(raw_content, match_content, *ExpressionList[static_cast<size_t>(HTML_TAG::EN_HEADING)].content);
+            }
+            if (ExpressionList[static_cast<size_t>(HTML_TAG::EN_HEADING)].attributes != nullptr)
+            {
+                hit_attribute = std::regex_search(raw_content, match_attributes, *ExpressionList[static_cast<size_t>(HTML_TAG::EN_HEADING)].attributes);
+            }
+            break;
+        case HTML_TAG::EN_TABLE:
+            content = "";
+            attributes.clear();
+            break;
+        case HTML_TAG::EN_TABLE_COLUMN:
+            if (ExpressionList[static_cast<size_t>(HTML_TAG::EN_TABLE_COLUMN)].content != nullptr)
+            {
+                hit_content = std::regex_search(raw_content, match_content, *ExpressionList[static_cast<size_t>(HTML_TAG::EN_TABLE_COLUMN)].content);
+                static const std::regex subattribute(R"(<\s*pre\s*>\s*<\s*a\s+([^>]+)>\s*([^<]+)\s*<\s*/a\s*>\s*<\s*/pre\s*>)");
+                if (hit_content)
+                {
+                    std::string dummy = match_content[1];
+                    sub_attributes = std::regex_search(dummy, match_subattributes, subattribute);
+                }
+            }
+            if (ExpressionList[static_cast<size_t>(HTML_TAG::EN_TABLE_COLUMN)].attributes != nullptr)
+            {
+                hit_attribute = std::regex_search(raw_content, match_attributes, *ExpressionList[static_cast<size_t>(HTML_TAG::EN_TABLE_COLUMN)].attributes);
+            }
+            break;
+        case HTML_TAG::EN_TABLE_ROW:
+            if (ExpressionList[static_cast<size_t>(HTML_TAG::EN_TABLE_ROW)].content != nullptr)
+            {
+                hit_content = std::regex_search(raw_content, match_content, *ExpressionList[static_cast<size_t>(HTML_TAG::EN_TABLE_ROW)].content);
+            }
+            if (ExpressionList[static_cast<size_t>(HTML_TAG::EN_TABLE_ROW)].attributes != nullptr)
+            {
+                hit_attribute = std::regex_search(raw_content, match_attributes, *ExpressionList[static_cast<size_t>(HTML_TAG::EN_TABLE_ROW)].attributes);
+            }
+            break;
+        case HTML_TAG::EN_ROOT:
+            content = "";
+            attributes.clear();
+            break;
+        }
+        
+        static const std::regex attrib_pattern(R"(([^\s]+)\s*=\s*([^\s]+))");
+        if (sub_attributes == true)
+        {
+            content = match_content[2].str();
+            std::string attribute = match_content[1].str();
+            std::smatch attr_match;
+
+            std::string::const_iterator searchStart = attribute.cbegin();
+            while (std::regex_search(searchStart, attribute.cend(), attr_match, attrib_pattern)) {
+                attributes[attr_match[1].str()] = attr_match[2].str();
+                searchStart = attr_match.suffix().first;
+            }
+
+            content = match_content[2].str();
+        }
+        else if (hit_content == true)
+        {
+            content = match_content[1].str();
+        }
+
+        if (hit_attribute == true)
+        {
+            
+            std::string attribute = match_content[1].str();
+            std::smatch attr_match;
+
+            std::string::const_iterator searchStart = attribute.cbegin();
+            while (std::regex_search(searchStart, attribute.cend(), attr_match, attrib_pattern)) {
+                attributes[attr_match[1].str()] = attr_match[2].str();
+                searchStart = attr_match.suffix().first;
+            }
+        }
+    };
+
+    bool retVal = true;
+    if (ptable != nullptr)
+    {
+        ST_DOMTREE* ptree = parser.ptree;
+        std::unordered_map<std::string, std::vector<std::string>> dictionary;
+        ST_TABLE_ELEMENT* table = nullptr;
+        ST_TABLE_ELEMENT* top = nullptr;
+
+        ST_TABLE_ELEMENT* sibling_node = nullptr;
+        ST_TABLE_ELEMENT* parent_node = nullptr;
+
+        std::stack<ST_DOMTREE*> parent;
+        std::stack<ST_TABLE_ELEMENT*> parent_element;
+        while (ptree)
+        {
+            ST_TABLE_ELEMENT* new_table = new ST_TABLE_ELEMENT;
+            if (new_table != nullptr)
+            {
+                if (top == nullptr)
+                    top = new_table;
+
+                new_table->tag = ptree->content.tag;
+                std::string cont = parser.html.substr(ptree->content.matching_pos, ptree->content.terminating_pos - ptree->content.matching_pos);
+                get_content_and_attributes(new_table->tag, cont, new_table->content, new_table->attributes);
+                if (ptree->pChild)
+                {
+                    dictionary[ptree->content.match[0].str()].push_back(parser.html.substr(ptree->content.matching_pos, ptree->content.terminating_pos - ptree->content.matching_pos));
+                    parent.push(ptree);
+                    ptree = ptree->pChild;
+
+                    new_table->pParent = parent_node;
+                    new_table->pPrev = sibling_node;
+
+                    if (sibling_node == nullptr)
+                    {
+                        if (parent_node != nullptr)
+                            parent_node->pSub = new_table;
+                    }
+                    else
+                    {
+                        sibling_node->pNext = new_table;
+                    }
+
+                    table = new_table;
+                    parent_node = table;
+                    sibling_node = nullptr;
+                    parent_element.push(table);
+                }
+                else if (ptree->pSiblings)
+                {
+                    dictionary[ptree->content.match[0].str()].push_back(parser.html.substr(ptree->content.matching_pos, ptree->content.terminating_pos - ptree->content.matching_pos));
+                    ptree = ptree->pSiblings;
+
+                    new_table->pParent = parent_node;
+                    new_table->pPrev = sibling_node;
+                    if (sibling_node != nullptr)
+                    {
+                        sibling_node->pNext = new_table;
+                    }
+                    else
+                    {
+                        if (parent_node != nullptr)
+                            parent_node->pSub = new_table;
+                    }
+                    //parent_node = nullptr;
+                    table = new_table;
+                    sibling_node = table;
+                }
+                else
+                {
+                    dictionary[ptree->content.match[0].str()].push_back(parser.html.substr(ptree->content.matching_pos, ptree->content.terminating_pos - ptree->content.matching_pos));
+                    if (sibling_node == nullptr)
+                    {
+                        if (parent_node != nullptr)
+                            parent_node->pSub = new_table;
+                    }
+                    else
+                    {
+                        sibling_node->pNext = new_table;
+                    }
+
+                    if (parent.size() == parent_element.size() && (parent.size() > 0))
+                    {
+                        do {
+                            ptree = parent.top();
+                            ptree = ptree->pSiblings;
+                            sibling_node = parent_element.top();
+                            parent.pop();
+                            parent_element.pop();
+                            if (parent_element.size())
+                            {
+                                parent_node = parent_element.top();
+                            }
+                            else
+                            {
+                                parent_node = nullptr;
+                            }
+                            new_table->pParent = sibling_node;
+                            table = sibling_node;
+                        } while ((parent.size() > 0) && (ptree == nullptr));
+                    }
+                    else
+                    {
+                        ptree = nullptr;
+                    }
+                }
+            }
+            else
+            {
+                retVal = false;
+                if (top != nullptr)
+                    delete top;
+                top = nullptr;
+            }
+        }
+
+        if (retVal == true)
+        {
+            retVal = false;
+            if ((top != nullptr) && (top->tag == HTML_TAG::EN_HTML))
+            {
+                static const std::string IdentStrings[] =
+                {
+                    "Filename", "Function Coverage", "Line Coverage" /*, "Region Coverage", "Branch Coverage"*/
+                };
+                if (top->pSub != nullptr)
+                {
+                    if (top->pSub->content == "Coverage Report")
+                    {
+                        if (top->pSub->pNext != nullptr)
+                        {
+                            if (top->pSub->pNext->content.find("Created:") != std::string::npos)
+                            {
+                                ST_TABLE_ELEMENT* table = findtag(HTML_TAG::EN_TABLE, top);
+                                if (table != nullptr)
+                                {
+                                    ST_TABLE_ELEMENT* row = findtag(HTML_TAG::EN_TABLE_ROW, table);
+                                    if (row != nullptr)
+                                    {
+                                        ST_TABLE_ELEMENT* column = findtag(HTML_TAG::EN_TABLE_COLUMN, row);
+                                        if (column != nullptr)
+                                        {
+                                            retVal = true;
+                                            for (const auto& i : IdentStrings)
+                                            {
+                                                bool check = false;
+                                                ST_TABLE_ELEMENT* find_table_headers = column;
+                                                while (find_table_headers)
+                                                {
+                                                    if (i == find_table_headers->content)
+                                                    {
+                                                        check = true;
+                                                        break;
+                                                    }
+                                                    find_table_headers = find_table_headers->pNext;
+                                                }
+                                                retVal = retVal && check;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    else
+    {
+        retVal = false;
+    }
+    return retVal;
+}
+
 /*------------------------------------------------------------------------------------------*//**
 \brief          traverses the index file and returns the table
 \
@@ -1686,11 +2067,15 @@ bool build_node_tree(std::string source, std::unordered_map<std::string, std::st
     if (parameter.find("index_file") != parameter.cend() && parameter.find("index_folder") != parameter.cend() && parameter.find("source_folder") != parameter.cend())
     {
         ST_DocumentContent index_file;
-        
+        ST_HTMLContent index_file_content;
+        ST_TABLE_ELEMENT* pIndexTableStruct;
         index_file.html_index_file.dom_document = nullptr;
 
         const std::string root = parameter["index_folder"] + "/";
         retVal = get_html_content(root + source, index_file.html_index_file);
+
+        retVal = load_index_file(root + source, index_file_content);
+        retVal = check_index_file_(index_file_content, &pIndexTableStruct);
         if (retVal == true)
         {
             retVal = check_index_file(index_file.html_index_file);
