@@ -379,46 +379,37 @@ static bool check_index_file(const ST_HTMLParser& parser)
 \param[out]     void
 \return         -
 *//*-------------------------------------------------------------------------------------------*/
-static bool build_relative_paths(ST_HTMLParser& parser)
+static bool build_relative_paths(std::vector<ST_TextAttributes>& attributes)
 {
-    static const std::string IdentStrings[] =
-    {
-        "Filename"// , "Function Coverage", "Line Coverage" /*, "Region Coverage", "Branch Coverage"*/
-    };
-
-    size_t column = std::string::npos;
-    size_t counter = 0;
-    for (const auto& all_cells : parser.table[0])
-    {
-        if (all_cells.text == IdentStrings[0])
-        {
-            column = counter;
-            parser.file_column = column;
-        }
-        ++counter;
-    }
-    
     const std::filesystem::path path = std::filesystem::current_path();
     const std::string rel_path(reinterpret_cast<const char*>(path.c_str()));
-    if (column != std::string::npos)
+
+    for (auto& i : attributes)
     {
-        for (auto& i : parser.table)
+        if (i.references.find("href") != i.references.cend())
         {
-            if (i[column].references.find("href") != i[column].references.cend())
+            std::string dummy = i.references["href"];
+            size_t ix = dummy.find(rel_path);
+            if (ix != std::string::npos)
             {
-                std::string dummy = i[column].references["href"];
-                size_t ix = dummy.find(rel_path);
-                if (ix != std::string::npos)
-                {
-                    static const std::string ending = ".html";
-                    size_t ending_ = dummy.find(ending);
-                    ending_ = ending_ == std::string::npos ? dummy.size() : ending_;
-                    dummy = dummy.substr(ix, ending_ - ix);
-                    i[column].references["rel_file_path"] = dummy;
-                }
+                static const std::string ending = ".html";
+                size_t ending_ = dummy.find(ending);
+                ending_ = ending_ == std::string::npos ? dummy.size() : ending_;
+                dummy = dummy.substr(ix, ending_ - ix);
+                i.references["rel_file_path"] = dummy;
+                i.crlf = false;
+            }
+            else
+            {
+                i.crlf = true;
             }
         }
+        else
+        {
+            i.crlf = true;
+        }
     }
+    attributes.erase(std::remove_if(attributes.begin(), attributes.end(), [](ST_TextAttributes& att)->bool {return att.crlf==true; }), attributes.end());
     return true;
 }
 
@@ -1754,6 +1745,84 @@ ST_TABLE_ELEMENT* findtag(HTML_TAG tag, ST_TABLE_ELEMENT* proot)
     return result;
 }
 
+ST_TABLE_ELEMENT* findcontent(const std::string& content, ST_TABLE_ELEMENT* proot)
+{
+    ST_TABLE_ELEMENT* result = nullptr;
+    if (proot != nullptr)
+    {
+        if (proot->content != content)
+        {
+            if (proot->pSub != nullptr)
+            {
+                result = findcontent(content, proot->pSub);
+            }
+
+            while (proot->pNext != nullptr && result == nullptr)
+            {
+                result = findcontent(content, proot->pNext);
+                proot = proot->pNext;
+            }
+        }
+        else
+        {
+            result = proot;
+        }
+    }
+    return result;
+}
+
+static bool create_index_table(ST_HTMLContent& parser, ST_TABLE_ELEMENT *proot, std::vector<ST_TextAttributes>& attrib)
+{
+    bool retVal = false;
+    attrib.clear();
+
+    static const std::string column_name = std::string("Filename");
+    ST_TABLE_ELEMENT* table = findcontent(column_name, proot);
+    if (table != nullptr)
+    {
+        if (table->pParent)
+        {
+            size_t column_number = 0;
+            ST_TABLE_ELEMENT* row = table->pParent;
+            if (row->pSub != nullptr)
+            {
+                ST_TABLE_ELEMENT* column_seeker = row->pSub;
+                while ((column_seeker != nullptr) && (column_seeker != table))
+                {
+                    column_number++;
+                    column_seeker = column_seeker->pNext;
+                }
+                if (column_seeker != nullptr)
+                {
+                    ST_TABLE_ELEMENT* table_line = table->pParent->pNext;
+                    
+                    while (table_line)
+                    {
+                        size_t x = column_number;
+                        ST_TABLE_ELEMENT* col = table_line->pSub;
+                        while (col)
+                        {
+                            if (x--==0)
+                            {
+                                ST_TextAttributes at;
+                                at.text = col->content;
+                                at.references = col->attributes;
+                                at.crlf = false;
+                                attrib.push_back(at);
+                                break;
+                            }
+                            col = col->pNext;
+                        }
+                        table_line = table_line->pNext;
+                    }
+                    retVal = true;
+                }
+            }
+        }
+    }
+    return retVal;
+}
+
 /*------------------------------------------------------------------------------------------*//**
 \brief          visit every file and extract content
 \
@@ -1762,7 +1831,7 @@ ST_TABLE_ELEMENT* findtag(HTML_TAG tag, ST_TABLE_ELEMENT* proot)
 \param[out]     void
 \return         -
 *//*-------------------------------------------------------------------------------------------*/
-static bool check_index_file_(ST_HTMLContent& parser, ST_TABLE_ELEMENT **ptable)
+static bool check_index_file(ST_HTMLContent& parser, ST_TABLE_ELEMENT **ptable, std::vector<ST_TextAttributes>& attrib)
 {
     const auto get_content_and_attributes = [](HTML_TAG tag, std::string& raw_content, std::string &content, std::unordered_map<std::string, std::string>& attributes) -> void
     {
@@ -1786,6 +1855,7 @@ static bool check_index_file_(ST_HTMLContent& parser, ST_TABLE_ELEMENT **ptable)
         std::smatch match_content;
         std::smatch match_attributes;
         std::smatch match_subattributes;
+        std::string subattribute_string;
 
         bool hit_content = false;
         bool hit_attribute = false;
@@ -1818,8 +1888,8 @@ static bool check_index_file_(ST_HTMLContent& parser, ST_TABLE_ELEMENT **ptable)
                 static const std::regex subattribute(R"(<\s*pre\s*>\s*<\s*a\s+([^>]+)>\s*([^<]+)\s*<\s*/a\s*>\s*<\s*/pre\s*>)");
                 if (hit_content)
                 {
-                    std::string dummy = match_content[1];
-                    sub_attributes = std::regex_search(dummy, match_subattributes, subattribute);
+                    subattribute_string = match_content[1];
+                    sub_attributes = std::regex_search(subattribute_string, match_subattributes, subattribute);
                 }
             }
             if (ExpressionList[static_cast<size_t>(HTML_TAG::EN_TABLE_COLUMN)].attributes != nullptr)
@@ -1846,8 +1916,8 @@ static bool check_index_file_(ST_HTMLContent& parser, ST_TABLE_ELEMENT **ptable)
         static const std::regex attrib_pattern(R"(([^\s]+)\s*=\s*([^\s]+))");
         if (sub_attributes == true)
         {
-            content = match_content[2].str();
-            std::string attribute = match_content[1].str();
+            content = match_subattributes[2].str();
+            std::string attribute = match_subattributes[1].str();
             std::smatch attr_match;
 
             std::string::const_iterator searchStart = attribute.cbegin();
@@ -1855,18 +1925,26 @@ static bool check_index_file_(ST_HTMLContent& parser, ST_TABLE_ELEMENT **ptable)
                 attributes[attr_match[1].str()] = attr_match[2].str();
                 searchStart = attr_match.suffix().first;
             }
-
-            content = match_content[2].str();
         }
         else if (hit_content == true)
         {
+            static const std::regex pre_removal(R"(<\s*pre\s*>\s*(.*)<\s*/pre\s*>)");
+            std::smatch match_cont;
             content = match_content[1].str();
+            if (std::regex_search(content, match_cont, pre_removal))
+            {
+                content = match_cont[1].str();
+            }
+            else
+            {
+                content = match_content[1].str();
+            }
         }
 
         if (hit_attribute == true)
         {
             
-            std::string attribute = match_content[1].str();
+            std::string attribute = match_attributes[1].str();
             std::smatch attr_match;
 
             std::string::const_iterator searchStart = attribute.cbegin();
@@ -1878,6 +1956,7 @@ static bool check_index_file_(ST_HTMLContent& parser, ST_TABLE_ELEMENT **ptable)
     };
 
     bool retVal = true;
+    attrib.clear();
     if (ptable != nullptr)
     {
         ST_DOMTREE* ptree = parser.ptree;
@@ -2035,6 +2114,11 @@ static bool check_index_file_(ST_HTMLContent& parser, ST_TABLE_ELEMENT **ptable)
                                                 }
                                                 retVal = retVal && check;
                                             }
+
+                                            if (retVal == true)
+                                            {
+                                                retVal = create_index_table(parser, row, attrib);
+                                            }
                                         }
                                     }
                                 }
@@ -2069,19 +2153,19 @@ bool build_node_tree(std::string source, std::unordered_map<std::string, std::st
         ST_DocumentContent index_file;
         ST_HTMLContent index_file_content;
         ST_TABLE_ELEMENT* pIndexTableStruct;
+        std::vector<ST_TextAttributes> attributes;
         index_file.html_index_file.dom_document = nullptr;
 
         const std::string root = parameter["index_folder"] + "/";
         retVal = get_html_content(root + source, index_file.html_index_file);
 
         retVal = load_index_file(root + source, index_file_content);
-        retVal = check_index_file_(index_file_content, &pIndexTableStruct);
         if (retVal == true)
         {
-            retVal = check_index_file(index_file.html_index_file);
+            retVal = check_index_file(index_file_content, &pIndexTableStruct, attributes);
             if (retVal == true)
             {
-                build_relative_paths(index_file.html_index_file);
+                build_relative_paths(attributes);
                 if (retVal == true)
                 {
                     retVal = dive_into_folder(parameter["source_folder"], index_file.html_index_file);
