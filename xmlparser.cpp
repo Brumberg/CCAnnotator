@@ -330,7 +330,7 @@ void findallattributes(const std::string& attrib_name, const std::string& attrib
     while (proot != nullptr)
     {
         get_attributes(proot, attrib_name, attrib_value, related_content);
-        std::cout << proot->content << std::endl;
+        //std::cout << proot->content << std::endl;
         
         if (proot->pSub != nullptr)
         {
@@ -1684,54 +1684,69 @@ static bool save_and_annotate_source_code(std::unordered_map<std::string, std::s
     const std::string exclude_line_from_code_coverage = parameter["cc_ignore"];
     const bool save_code_as_different_file = parameter["create_new_sourcefiles"] == "true";
     const std::string src_extension = parameter["sourcefile_modifier"];
-    
+    const std::string uncovered_line_exception = parameter["uncovered_line"];
+    const std::string uncovered_branch_exception = parameter["uncovered_branch"];
+
     for (auto& i : tree)
     {
         ST_TABLE_ELEMENT* ptable;
         std::vector<ST_TextAttributes> attrib;
         retVal &= build_full_dom_tree(tree[i.first], ptable, attrib);
-        show_all_nodes(0, ptable);
+        //show_all_nodes(0, ptable);
         if (retVal == true)
         {
             ST_TABLE_ELEMENT* table_node = findtag(HTML_TAG::EN_TABLE, ptable);
             if (table_node)
             {
                 std::vector<ST_TABLE_ELEMENT*> line_numbers;
-                std::vector<ST_TABLE_ELEMENT*> related_class;
-                std::vector<ST_TABLE_ELEMENT*> related_code;
+                std::vector<ST_TABLE_ELEMENT*> uncovered_code;
+                std::vector<ST_TABLE_ELEMENT*> covered_code;
+                std::vector<ST_TABLE_ELEMENT*> count;
+                std::vector<ST_TABLE_ELEMENT*> code;
+                std::vector<ST_TABLE_ELEMENT*> uncovered_branch;
                 findallattributes("class", "line-number", ptable, line_numbers);
-                findallattributes("class", "uncovered-line", ptable, related_class);
-                findallattributes("class", "code", ptable, related_code);
-                //std::cout << "Line is not covered "  << uncovered_line_node->content << std::endl;
+                findallattributes("class", "covered-line", ptable, covered_code);
+                findallattributes("class", "uncovered-line", ptable, uncovered_code);
+                findallattributes("class", "uncovered-line", ptable, uncovered_code);
+                //findallattributes("class", "red", ptable, uncovered_branch);
+                findallattributes("class", "code", ptable, code);
+
+                std::unordered_set<std::string> pure_uncovered_lines;
+                for (const auto& i : uncovered_code)
+                {
+                    //static const std::regex zeropattern = std::regex(R"0");
+                    //std::smatch is_zero;
+                    if (i->content == "0")
+                    {
+                        std::regex escaped_a_cpp_comment(".*?//.*?" + std::regex_replace(uncovered_line_exception, std::regex("([.^$|()\\[\\]{}*+?\\\\])"), "\\$1"));
+                        std::regex escaped_a_c_comment(".*?/\\*.*?" + std::regex_replace(uncovered_line_exception, std::regex("([.^$|()\\[\\]{}*+?\\\\])"), "\\$1") + "\\*/$");
+                        if (i->pNext)
+                        {
+                            //std::cout << "Potential line: " << i->pPrev->content << std::endl;
+                            std::string& code_content = i->pNext->content;
+                            if (!std::regex_match(code_content, escaped_a_cpp_comment) && !std::regex_match(code_content, escaped_a_c_comment))
+                            {
+                                //std::cout << "Uncovered line: " << i->pPrev->content << std::endl;
+                                pure_uncovered_lines.insert(i->pPrev->content);
+                            }
+                        }
+                    }
+                }
+                const auto src_iterator = source.find(i.first);
+                if (src_iterator != source.cend())
+                {
+                    retVal = extract_metric(parameter, parameter["uncovered_line"], pure_uncovered_lines, src_iterator->second);
+                    //retVal &= extract_metric(parameter, parameter["uncovered_branch"], pure_uncovered_branch, src.second);
+                    if (retVal==true)
+                    {
+                        std::string sourcfile_name = save_code_as_different_file == false ? src_iterator->first : src_iterator->first + src_extension;
+                        retVal &= save_file(sourcfile_name, src_iterator->second);
+                    }
+                }
             }
-
+            if (retVal == false)
+                break;
         }
-#if 0
-        findattribute("", const std::string & attrib_value, ST_TABLE_ELEMENT * proot)
-        for (auto& src : source[i.first])
-        {
-
-            if (src.first.find(i.first.c_str()) != std::string::npos)
-            {
-
-                std::unordered_set<std::string>& uncovered_line = i.second.code_metric["uncovered-line"];
-                std::unordered_set<std::string>& uncovered_branch = i.second.code_metric["uncovered-branch"];
-                std::unordered_set<std::string>& covered_line = i.second.code_metric["covered-line"];
-                std::unordered_set<std::string> pure_uncovered_branch = intersect(covered_line, uncovered_branch);
-                std::unordered_set<std::string> covered_branch = intersect(uncovered_line, uncovered_branch);
-                               
-
-                bool retVal = extract_metric(parameter, parameter["uncovered_line"], uncovered_line, src.second);
-                retVal &= extract_metric(parameter, parameter["uncovered_branch"], pure_uncovered_branch, src.second);
-                
-                std::string sourcfile_name = save_code_as_different_file == false ? src.first : src.first + src_extension;
-                retVal &= save_file(sourcfile_name, src.second);
-
-            }
-        }
-        if (retVal == false)
-            break;
-#endif
     }
 
     return retVal;
