@@ -1031,6 +1031,8 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
     std::unordered_map<size_t, size_t> dict_uncovered_lines;
     std::unordered_map<size_t, size_t> dict_accepted_uncovered_lines;
 
+    static const std::regex annotation_patterm(R"(//.*?&lt;cov\s+class=&apos;(A\d)&apos;&gt;(.*?)&lt;\s*/cov\s*&gt;)");
+
     while (tree != nullptr)
     {
         std::string sub_content;
@@ -1059,7 +1061,6 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
             row_match = tree;
             row_count = 0;
             std::smatch match;
-            static const std::regex pattern(R"(//.*?&lt;cov\s+class=&apos;(A\d)&apos;&gt;(.*?)&lt;\s*/cov\s*&gt;)");
             static const std::regex table_pattern(R"(<\s*table\s*>)");
             //const size_t endpos = (tree->pChild != nullptr) ? tree->pChild->content.matching_pos : tree->content.terminating_pos;
             size_t length = tree->content.terminating_pos == std::string::npos ? 0u : tree->content.terminating_pos - tree->content.matching_pos;
@@ -1075,7 +1076,7 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
             if (length)
             {
                 const std::string exp = content.substr(tree->content.matching_pos, length);
-                bool hit = std::regex_search(exp, match, pattern);
+                bool hit = std::regex_search(exp, match, annotation_patterm);
                 if (hit == true)
                 {
                     annotation_string = match[1].str();
@@ -1204,8 +1205,7 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                             latest_hit = tree->content.terminating_pos;
 
                             std::smatch match;
-                            static const std::regex pattern(R"(&lt;cov\s+class=&apos;(A\d)&apos;&gt;(.*?)&lt;\s*/cov\s*&gt;)");
-                            const bool match_annotation = std::regex_search(dummy, match, pattern);
+                            const bool match_annotation = std::regex_search(dummy, match, annotation_patterm);
                             if (match_annotation)
                             {
                                 std::string prefix_str(match.prefix().first, match.prefix().second);
