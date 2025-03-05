@@ -998,6 +998,13 @@ static bool create_DOM_tree(const std::string& content, ST_DOMTREE** ppDomTree)
 
 static bool create_annotated_html(const std::string& content, std::string& new_content, ST_Statistics& stats, ST_DOMTREE* pDomTree)
 {
+    const auto check_if_bracket = [](std::string& code) -> bool
+    {
+        static const std::regex no_content(R"(<\s*span\s*class\s*=\s*'red'[^>]*>\s*(?:\{|\}|else){1}\s*(//)?)");
+        std::smatch match;
+        return std::regex_search(code, match, no_content);
+    };
+
     ST_DOMTREE* tree = pDomTree;
     std::stack<ST_DOMTREE*> parent;
     std::stack<bool> table_match;
@@ -1031,7 +1038,8 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
     std::unordered_map<size_t, size_t> dict_uncovered_lines;
     std::unordered_map<size_t, size_t> dict_accepted_uncovered_lines;
 
-    static const std::regex annotation_patterm(R"(//.*?&lt;cov\s+class=&apos;(A\d)&apos;&gt;(.*?)&lt;\s*/cov\s*&gt;)");
+    //static const std::regex annotation_pattern(R"(//.*?&lt;cov\s+class=&apos;(A\d)&apos;&gt;(.*?)&lt;\s*/cov\s*&gt;)");
+    static const std::regex annotation_pattern(R"(//.*?ccov:\s+(A\d{1})(?:\b.*&lt;\s*([^&]+)\s*&gt;)*)");
 
     while (tree != nullptr)
     {
@@ -1075,13 +1083,55 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
 
             if (length)
             {
-                const std::string exp = content.substr(tree->content.matching_pos, length);
-                bool hit = std::regex_search(exp, match, annotation_patterm);
-                if (hit == true)
+                bool is_plain_line = false;
+                ST_DOMTREE* lock_ahead = tree;
+                if (tree->pChild != nullptr)
                 {
-                    annotation_string = match[1].str();
-                    additional_remarks = match[2].str();
-                    annotation = annotation_string;
+                    bool expr_line = false;
+                    while (lock_ahead->pSiblings)
+                    {
+                        static const std::regex expr_code(R"(class\s*=\s*'code')");
+                        static const std::regex expr_line(R"(class\s*=\s*'uncovered-line')");
+                        const size_t length = lock_ahead->content.terminating_pos == std::string::npos ? std::string::npos : lock_ahead->content.terminating_pos - lock_ahead->content.matching_pos;
+                        std::string block = content.substr(lock_ahead->content.matching_pos, length);
+                        expr_line = std::regex_search(block, match, expr_line);
+                        if (expr_line == true)
+                        {
+                        }
+                        else
+                        {
+                            bool start_found = std::regex_search(block, match, expr_code);
+
+                            if (start_found == true)
+                            {
+                                if (check_if_bracket(block))
+                                {
+                                    annotation_string = "E0";
+                                    additional_remarks = "not executable";
+                                    annotation = annotation_string;
+                                    is_plain_line = true;
+                                }
+
+                                break;
+                            }
+                        }
+                        lock_ahead = lock_ahead->pSiblings;
+                    }
+                }
+                if (is_plain_line==false)
+                {
+                    const std::string exp = content.substr(tree->content.matching_pos, length);
+                    bool hit = std::regex_search(exp, match, annotation_pattern);
+                    if (hit == true)
+                    {
+                        annotation_string = match[1].str();
+                        additional_remarks = match[2].str();
+                        annotation = annotation_string;
+                    }
+                    else
+                    {
+
+                    }
                 }
             }
         }
@@ -1135,7 +1185,7 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                     static const std::regex expr_uncovered_line(R"(class='uncovered-line')");
                     static const std::regex expr_real_uncovered_line(R"(<\s*?td\s*?class\s*?=\s*?'uncovered-line'><pre>(0)</pre><\s*?/td\s*?>)");
                     static const std::regex expr_code(R"(class='code')");
-                    static const std::regex exception_code(R"(A[0-7])");
+                    static const std::regex exception_code(R"([AE]?[0-7])");
                     std::string exp = tree->content.match[0].str();
                     bool found_start = std::regex_search(exp, match, expr_line_no);
                     if (found_start)
@@ -1184,8 +1234,8 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                     {
                         static const std::string additional_column_remarks_start = "<td class='remark'><pre>";
                         static const std::string additional_column_remarks_stop = "</pre></td>";
-                        std::string dummy;
-                        dummy.append(content, latest_hit, tree->content.terminating_pos - latest_hit);
+                        std::string code_row;
+                        code_row.append(content, latest_hit, tree->content.terminating_pos - latest_hit);
                         new_content.append(content, latest_hit, tree->content.terminating_pos - latest_hit);
                         latest_hit = tree->content.terminating_pos;
                         new_content.append(additional_column_remarks_start + additional_remarks + additional_column_remarks_stop);
@@ -1195,31 +1245,53 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                     found_start = std::regex_search(exp, match, expr_code);
                     if (found_start)
                     {
-                        if (annotated_code)
+                        const size_t length = tree->content.terminating_pos == std::string::npos ? std::string::npos : tree->content.terminating_pos - latest_hit;
+                        std::string code_row = content.substr(latest_hit, tree->content.terminating_pos - latest_hit);
+
+                        bool bracket_check = check_if_bracket(code_row);
+                        if (annotated_code || bracket_check)
                         {
                             static const std::regex class_red(R"(<\s*span\s*class\s*=\s*'red')");
-                            static const std::string class_cyan = "<span class='cyan'";
-                            std::string dummy = content.substr(latest_hit, tree->content.terminating_pos - latest_hit);
-
-                            dummy = std::regex_replace(dummy, class_red, class_cyan);
-                            latest_hit = tree->content.terminating_pos;
-
-                            std::smatch match;
-                            const bool match_annotation = std::regex_search(dummy, match, annotation_patterm);
-                            if (match_annotation)
+                            if (bracket_check==false)
                             {
-                                std::string prefix_str(match.prefix().first, match.prefix().second);
-                                std::string suffix_str(match.suffix().first, match.suffix().second);
-                                dummy = prefix_str + suffix_str;
-                                static const std::regex del_comment(R"(\s*//\s*(?=(<\s*/span\s*>)*<\s*/pre\s*><\s*/td\s*>))");
-                                const bool del_comment_result = std::regex_search(dummy, match, del_comment);
-                                if (del_comment_result)
+                                static const std::string class_cyan = "<span class='cyan'";
+                                code_row = std::regex_replace(code_row, class_red, class_cyan);
+                            }
+                            else
+                            {
+                                static const std::regex no_content(R"(<\s*span\s*class\s*=\s*'red'[^>]*>(.*?)<\s*/span\s*>)");
+                                std::smatch match;
+                                if (std::regex_search(code_row, match, no_content))
                                 {
-                                    dummy = std::string(match.prefix().first, match.prefix().second);
-                                    latest_hit = tree->content.terminating_pos;
+                                    std::string prefix_str(match.prefix().first, match.prefix().second);
+                                    std::string suffix_str(match.suffix().first, match.suffix().second);
+                                    code_row = prefix_str + match[1].str() + suffix_str;
                                 }
                             }
-                            new_content.append(dummy);
+
+                            latest_hit = tree->content.terminating_pos;
+                            if (bracket_check == false)
+                            {
+                                std::smatch match;
+                                const bool match_annotation = std::regex_search(code_row, match, annotation_pattern);
+                                if (match_annotation)
+                                {
+                                    std::string prefix_str(match.prefix().first, match.prefix().second);
+                                    std::string suffix_str(match.suffix().first, match.suffix().second);
+                                    code_row = prefix_str + suffix_str;
+                                    static const std::regex del_comment(R"(\s*//\s*(?=(<\s*/span\s*>)*<\s*/pre\s*><\s*/td\s*>))");
+                                    const bool del_comment_result = std::regex_search(code_row, match, del_comment);
+                                    if (del_comment_result)
+                                    {
+                                        code_row = std::string(match.prefix().first, match.prefix().second);
+                                        latest_hit = tree->content.terminating_pos;
+                                    }
+                                }
+                            }
+                            else
+                            {
+                            }
+                            new_content.append(code_row);
                         }
                         annotation.clear();
                         annotation_string.clear();
