@@ -18,6 +18,7 @@ int main(int ac, char** av) {
         desc.add_options()
             ("help", "produce help message")
             ("index_file", po::value<std::string>()->default_value("index.html"), "specifies the root index file")
+            ("annotated_index_file", po::value<std::string>()->default_value("annotated_index.html"), "specifies the root index file")
             ("index_folder", po::value<std::string>()->default_value("./code_coverage_report"), "specifies the index folder")
             ("source_folder", po::value<std::string>()->default_value(".", "specifies the corresponding source folder"))
             ("patch_sourcefile", po::value<std::string>()->default_value("false"), "specifies the sourcefile to update")
@@ -45,6 +46,7 @@ int main(int ac, char** av) {
 
             std::unordered_map<std::string, std::string> parameters;
             parameters["index_file"] = vm["index_file"].as<std::string>();
+            parameters["annotated_index_file"] = vm["annotated_index_file"].as<std::string>();
             parameters["index_folder"] = vm["index_folder"].as<std::string>();
             parameters["source_folder"] = vm["source_folder"].as<std::string>();
             parameters["patch_sourcefile"] = vm["patch_sourcefile"].as<std::string>();

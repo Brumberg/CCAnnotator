@@ -187,12 +187,17 @@ struct ST_DocumentCollectionContent
 
 struct ST_Statistics
 {
-    size_t No_Uncovered_Lines;
+    size_t No_Overall_Lines;
     size_t No_Covered_Lines;
+    size_t No_Uncovered_Lines;
+    size_t No_Accepted_Uncovered_Lines;
+    size_t No_Remaining_Uncovered_Lines;
     size_t No_Annotated_Lines;
     float percentange_covered_lines;
     float percentange_uncovered_lines;
     float percentange_annotated_and_covered_lines;
+    std::string file_name;
+    std::string file_anchor;
 };
 
 ST_DOMTREE* findtag(HTML_TAG tag, ST_DOMTREE* proot)
@@ -1000,7 +1005,7 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
 {
     const auto check_if_bracket = [](std::string& code) -> bool
     {
-        static const std::regex no_content(R"(<\s*span\s*class\s*=\s*'red'[^>]*>\s*(?:\{|\}|else){1}\s*(//)?)");
+        static const std::regex no_content(R"(<\s*span\s*class\s*=\s*'red'[^>]*>\s*(?:\{|\}|else){1}\s*(//)?|<\s*pre\s*>\s*else\s*(//)?)");
         std::smatch match;
         return std::regex_search(code, match, no_content);
     };
@@ -1034,9 +1039,11 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
     std::string annotation;
     std::string annotation_string;
     std::string additional_remarks;
+    std::unordered_map<size_t, size_t> overall_number_of_lines;
     std::unordered_map<size_t, size_t> dict_covered_lines;
     std::unordered_map<size_t, size_t> dict_uncovered_lines;
     std::unordered_map<size_t, size_t> dict_accepted_uncovered_lines;
+    std::unordered_map<size_t, size_t> dict_remaining_uncovered_lines;
 
     //static const std::regex annotation_pattern(R"(//.*?&lt;cov\s+class=&apos;(A\d)&apos;&gt;(.*?)&lt;\s*/cov\s*&gt;)");
     static const std::regex annotation_pattern(R"(//.*?ccov:\s+(A\d{1})(?:\b.*&lt;\s*([^&]+)\s*&gt;)*)");
@@ -1084,37 +1091,47 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
             if (length)
             {
                 bool is_plain_line = false;
-                ST_DOMTREE* lock_ahead = tree;
+                
                 if (tree->pChild != nullptr)
                 {
-                    bool expr_line = false;
-                    while (lock_ahead->pSiblings)
+                    bool expr_line_result = false;
+                    bool potentially_unexecutable_code = false;
+                    ST_DOMTREE* lock_ahead = tree->pChild;
+                    while (lock_ahead)
                     {
                         static const std::regex expr_code(R"(class\s*=\s*'code')");
-                        static const std::regex expr_line(R"(class\s*=\s*'uncovered-line')");
+                        //static const std::regex expr_line(R"(class\s*=\s*'uncovered-line')");
                         const size_t length = lock_ahead->content.terminating_pos == std::string::npos ? std::string::npos : lock_ahead->content.terminating_pos - lock_ahead->content.matching_pos;
                         std::string block = content.substr(lock_ahead->content.matching_pos, length);
-                        expr_line = std::regex_search(block, match, expr_line);
-                        if (expr_line == true)
+                        /*expr_line_result = std::regex_search(block, match, expr_line);
+                        if (expr_line_result == true)
                         {
-                        }
-                        else
-                        {
-                            bool start_found = std::regex_search(block, match, expr_code);
-
-                            if (start_found == true)
+                            static const std::regex expr_real_uncovered_line(R"(<\s*?td\s*?class\s*?=\s*?'uncovered-line'><pre>(0)</pre><\s*?/td\s*?>)");
+                            expr_line_result = std::regex_search(block, match, expr_line);
+                            if (expr_line_result)
                             {
-                                if (check_if_bracket(block))
-                                {
-                                    annotation_string = "E0";
-                                    additional_remarks = "not executable";
-                                    annotation = annotation_string;
-                                    is_plain_line = true;
-                                }
-
-                                break;
+                                //check for else
+                                potentially_unexecutable_code = true;
                             }
                         }
+                        else
+                        {*/
+
+                        bool start_found = std::regex_search(block, match, expr_code);
+
+                        if (start_found == true)
+                        {
+                            if (check_if_bracket(block))
+                            {
+                                annotation_string = "E0";
+                                additional_remarks = "not executable";
+                                annotation = annotation_string;
+                                is_plain_line = true;
+                            }
+
+                            break;
+                        }
+                        //}
                         lock_ahead = lock_ahead->pSiblings;
                     }
                 }
@@ -1177,7 +1194,6 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                 }
                 else
                 {
-
                     //match OK
                     std::smatch match;
                     static const std::regex expr_line_no(R"(class='line-number')");
@@ -1225,6 +1241,7 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                                 currently_processed_line = 0u;
                                 std::cerr << "Invalid argument: " << ia.what() << std::endl;
                             }
+                            ++overall_number_of_lines[currently_processed_line];//is the error bin
                         }
                     }
 
@@ -1335,6 +1352,8 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                             if (!covered_by_exception && real_line_uncovered)
                             {
                                 ++remaining_uncovered_lines;
+                                if (currently_processed_line>0)
+                                    ++dict_remaining_uncovered_lines[currently_processed_line];
                             }
                             else
                             {
@@ -1353,7 +1372,14 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                                     if (currently_processed_line != 0u)
                                     {
                                         if (covered_by_exception)
+                                        {
                                             ++dict_accepted_uncovered_lines[currently_processed_line];
+                                        }
+                                        else
+                                        {
+                                            if (real_line_uncovered && currently_processed_line>0)
+                                                ++dict_remaining_uncovered_lines[currently_processed_line];
+                                        }
                                     }
                                 }
                             }
@@ -1361,12 +1387,10 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                         annotation.clear();
                         annotation_string.clear();
                     }
-
                     ++row_count;
                     line_hit = false;
                     count_hit = false;
                     source_hit = false;
-
                 }
             }
         }
@@ -1444,15 +1468,21 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
     if (latest_hit != std::string::npos)
         new_content.append(content, latest_hit);
 
+    const auto a = overall_number_of_lines.find(0);
+    const size_t number_of_processed_lines = (a != overall_number_of_lines.cend()) ? overall_number_of_lines.size() - a->second : overall_number_of_lines.size();
+
     stats.No_Covered_Lines = dict_covered_lines.size();
-    stats.No_Annotated_Lines = dict_accepted_uncovered_lines.size();
     stats.No_Uncovered_Lines = dict_uncovered_lines.size();
-    const size_t overall_number_of_lines = stats.No_Covered_Lines + stats.No_Uncovered_Lines;
-    if (overall_number_of_lines)
+    stats.No_Accepted_Uncovered_Lines = dict_accepted_uncovered_lines.size();
+    stats.No_Remaining_Uncovered_Lines = dict_remaining_uncovered_lines.size();
+    stats.No_Annotated_Lines = dict_accepted_uncovered_lines.size();
+    stats.No_Overall_Lines = stats.No_Covered_Lines + stats.No_Uncovered_Lines;
+
+    if (number_of_processed_lines)
     {
-        stats.percentange_uncovered_lines = static_cast<float>(stats.No_Uncovered_Lines) / static_cast<float>(overall_number_of_lines);
-        stats.percentange_covered_lines = static_cast<float>(stats.No_Covered_Lines) / static_cast<float>(overall_number_of_lines);
-        stats.percentange_annotated_and_covered_lines = static_cast<float>(stats.No_Uncovered_Lines - stats.No_Annotated_Lines) / static_cast<float>(overall_number_of_lines);
+        stats.percentange_uncovered_lines = static_cast<float>(stats.No_Uncovered_Lines) / static_cast<float>(number_of_processed_lines);
+        stats.percentange_covered_lines = static_cast<float>(stats.No_Covered_Lines) / static_cast<float>(number_of_processed_lines);
+        stats.percentange_annotated_and_covered_lines = static_cast<float>(stats.No_Uncovered_Lines - stats.No_Annotated_Lines) / static_cast<float>(number_of_processed_lines);
     }
     return true;
 }
@@ -1874,19 +1904,18 @@ static bool save_and_annotate_source_code(std::unordered_map<std::string, std::s
     return retVal;
 }
 
-static bool patch_html_file(const std::string& content, std::string& filename, ST_Statistics& stats)
+static bool patch_html_file(const std::string& content, const std::string& filename, ST_Statistics& stats)
 {
     ST_DOMTREE* pDomTree = nullptr;
     std::string new_content;
     
-    std::regex stylesheet(R"(href='[./\\]*style.css')");
-    std::string adapted_content = std::regex_replace(content, stylesheet, "href='./style.css'");
-
+    //std::regex stylesheet(R"(href='[./\\]*style.css')");
+    //std::string adapted_content = std::regex_replace(content, stylesheet, "href='./style.css'");
+    std::string adapted_content = content;
     bool retVal = create_DOM_tree(adapted_content, &pDomTree);
     if (retVal == true)
     {
         create_annotated_html(adapted_content, new_content, stats, pDomTree);
-        filename = "Test.html";
         retVal = write_html_file(filename, new_content);
         if (pDomTree != nullptr)
         {
@@ -1902,6 +1931,8 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
     const std::string exclude_line_from_code_coverage = parameter["cc_ignore"];
     const bool save_code_as_different_file = parameter["create_new_sourcefiles"] == "true";
     const std::string src_extension = parameter["sourcefile_modifier"];
+    const std::string annotated_index_file = parameter["annotated_index_file"];
+    size_t file_no = 0;
     //unordered_map<std::string, > statistics;
     std::unordered_map<std::string, ST_Statistics> statistics;
     for (auto& i : source.attributes)
@@ -1927,8 +1958,42 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
             if (retVal == true)
             {
                 ST_Statistics stats;
-                std::string output;
-                retVal = patch_html_file(content, output, stats);
+                //const auto filename_iterator = i.references.find("src_file");
+                
+                static const std::regex mod_string(R"((.+)\.html$)");
+                std::smatch match;
+                bool file_found = std::regex_search(file_name, match, mod_string);
+                if (file_found)
+                {
+                    std::string annotated_filename = match[1].str() + "_anno.html";
+                    i.references["annotated_src"] = annotated_filename;
+                    static const std::regex file_name_capture(R"(.*[\\/]([^\\/]+\.html$))");
+                    if (std::regex_search(annotated_filename, match, file_name_capture))
+                    {
+                        file_name = match[1];
+                    }
+                    
+                    if (root.size() > 0)
+                    {
+                        size_t remove_root = annotated_filename.find(root);
+                        if (remove_root != std::string::npos)
+                        {
+                            annotated_filename = "./" + annotated_filename.substr(remove_root + root.length());
+                        }
+                    }
+                    stats.file_name = file_name;
+                    stats.file_anchor = annotated_filename;
+                }
+                else
+                {
+                    std::stringstream alternative_file_name;
+                    alternative_file_name << "undefined_anno_" << fileno << ".html";
+                    i.references["annotated_src"] = alternative_file_name.str();
+                    stats.file_name = alternative_file_name.str();
+                    stats.file_anchor = file_name;
+                }
+
+                retVal = patch_html_file(content, stats.file_anchor, stats);
                 if (retVal == true)
                 {
                     statistics[i.references["href"]] = stats;
@@ -1945,7 +2010,7 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
                 break;
             }
         }
-
+        file_no++;
     }
 
     if (retVal == true)
@@ -1988,7 +2053,7 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
                     while (column_node->pSiblings != nullptr) {column_node = column_node->pSiblings;}
                     if (column_node)
                     {
-                        static const std::string new_column = "<td class=\"column-entry-bold\">Annotated Line Coverage</td>";
+                        static const std::string new_column = "<td class=\"column-entry-bold\">Annotated Line Coverage</td><td class=\"column-entry-bold\">Annotated file</td>";
                         new_index_file = source.index_file.html.substr(0, column_node->content.terminating_pos) + new_column;
                         ST_DOMTREE* base_node_next = base_node->pSiblings;
                         last_pos = column_node->content.terminating_pos;
@@ -2000,12 +2065,27 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
                     retVal = false;
                 }
                 ST_Statistics overall_stats;
-                overall_stats.No_Annotated_Lines = 0;
+                overall_stats.No_Overall_Lines = 0;
                 overall_stats.No_Covered_Lines = 0;
                 overall_stats.No_Uncovered_Lines = 0;
+                overall_stats.No_Accepted_Uncovered_Lines = 0;
+                overall_stats.No_Remaining_Uncovered_Lines = 0;
+                overall_stats.No_Annotated_Lines = 0;
                 overall_stats.percentange_annotated_and_covered_lines = 0.f;
                 overall_stats.percentange_covered_lines = 0.f;
                 overall_stats.percentange_uncovered_lines = 0.f;
+
+                const auto flush_statistics = [](const ST_Statistics& stats)->std::string
+                {
+                    const size_t overall_lines = stats.No_Overall_Lines;
+                    const size_t No_Remaining_Uncovered_Lines = stats.No_Remaining_Uncovered_Lines;
+                    const size_t covered_lines = overall_lines - No_Remaining_Uncovered_Lines;
+                    std::string color = (No_Remaining_Uncovered_Lines == 0) ? "green" : (static_cast<float>(covered_lines) / static_cast<float>(overall_lines)) > 0.5 ? "yellow" : "red";
+                    std::stringstream ss;
+                    const auto old_precision = ss.precision();
+                    ss << "<td class=\"column-entry-" << color << "\"><pre>" << std::fixed << std::setprecision(2) << (static_cast<float>(covered_lines) / static_cast<float>(overall_lines)) * 100 << "% (" << covered_lines << "/" << overall_lines << ")</pre></td>" << std::setprecision(old_precision);
+                    return ss.str();
+                };
 
                 while (table_root_node != nullptr)
                 {
@@ -2078,20 +2158,27 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
                                 const auto statref = statistics.find(href->second);
                                 if (statref != statistics.cend())
                                 {
+                                    size_t overall_lines = statref->second.No_Overall_Lines;
                                     size_t Covered_Lines = statref->second.No_Covered_Lines;
-                                    size_t Annotated_Lines = statref->second.No_Annotated_Lines;
                                     size_t Uncovered_Lines = statref->second.No_Uncovered_Lines;
-                                    size_t overall_lines = Covered_Lines + Uncovered_Lines;
-
+                                    size_t Accepted_Uncovered_Lines = statref->second.No_Accepted_Uncovered_Lines;
+                                    size_t Remaining_Uncovered_Lines = statref->second.No_Remaining_Uncovered_Lines;
+                                    size_t Annotated_Lines = statref->second.No_Annotated_Lines;
+                                    
+                                    overall_stats.No_Overall_Lines += overall_lines;
                                     overall_stats.No_Covered_Lines += Covered_Lines;
-                                    overall_stats.No_Annotated_Lines += Annotated_Lines;
                                     overall_stats.No_Uncovered_Lines += Uncovered_Lines;
+                                    overall_stats.No_Accepted_Uncovered_Lines += Accepted_Uncovered_Lines;
+                                    overall_stats.No_Remaining_Uncovered_Lines += Remaining_Uncovered_Lines;
+                                    overall_stats.No_Annotated_Lines += Annotated_Lines;
+                                    
+                                    new_index_file += flush_statistics(statref->second);
+                                    std::stringstream file_linkage;
+                                    //const auto file_identifier = source.attributes.;
+                                    //if (file_identifier)
 
-                                    std::string color = (Uncovered_Lines == 0) ? "green" : (static_cast<float>(Covered_Lines) / static_cast<float>(overall_lines)) > 0.5 ? "yellow" : "red";
-                                    std::stringstream ss;
-                                    const auto old_precision = ss.precision();
-                                    ss << "<td class=\"column-entry-" << color << "\"><pre>" << std::setprecision(2) << (static_cast<float>(Covered_Lines) / static_cast<float>(overall_lines)) * 100 << "% (" << Covered_Lines << "/" << overall_lines << ")</pre></td>" << std::setprecision(old_precision);
-                                    new_index_file += ss.str();
+                                    file_linkage << "<td><pre><a href=\"" << statref->second.file_anchor << "\">" << statref->second.file_name << "</a></pre></td>";
+                                    new_index_file += file_linkage.str();
                                 }
                             }
                         }
@@ -2100,17 +2187,8 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
                             while (column_node->pSiblings != nullptr) column_node = column_node->pSiblings;
                             new_index_file += source.index_file.html.substr(last_pos, column_node->content.terminating_pos - last_pos);
                             last_pos = column_node->content.terminating_pos;
-
-                            size_t Covered_Lines = overall_stats.No_Covered_Lines;
-                            size_t Annotated_Lines = overall_stats.No_Annotated_Lines;
-                            size_t Uncovered_Lines = overall_stats.No_Uncovered_Lines;
-                            size_t overall_lines = Covered_Lines + Uncovered_Lines;
-
-                            std::string color = (Uncovered_Lines == 0) ? "green" : (static_cast<float>(Covered_Lines) / static_cast<float>(overall_lines)) > 0.5 ? "yellow" : "red";
-                            std::stringstream ss;
-                            const auto old_precision = ss.precision();
-                            ss << "<td class=\"column-entry-" << color << "\"><pre>" << std::setprecision(2) << (static_cast<float>(Covered_Lines) / static_cast<float>(overall_lines))*100 << "% (" << Covered_Lines << "/" << overall_lines << ")</pre></td>" << std::setprecision(old_precision);
-                            new_index_file += ss.str();
+                            new_index_file += flush_statistics(overall_stats);
+                            new_index_file += "<td><pre></pre></td>";
                         }
                     }
                     else
@@ -2123,7 +2201,18 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
                 if (retVal == true)
                 {
                     new_index_file += source.index_file.html.substr(last_pos);
-                    retVal = save_file("new_index_file.html", new_index_file);
+                    std::string dest_file;
+
+                    if (annotated_index_file.size())
+                    {
+                        dest_file = root + annotated_index_file;
+                    }
+                    else
+                    {
+                        dest_file = root + "annotated_index.html";
+                    }
+                    
+                    retVal = save_file(dest_file, new_index_file);
                 }
             }
         }
