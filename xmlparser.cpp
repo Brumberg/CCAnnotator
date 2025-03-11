@@ -14,6 +14,8 @@
 #include <stack>
 #include <unordered_map>
 #include <cassert>
+#include "VersionInfo.h"
+#include "Annotation_remarks.h"
 
 struct ST_HTMLTags
 {
@@ -144,7 +146,7 @@ struct ST_DOMTREE
     ST_DOMTREE* pChild;
     ST_DOMTREE* pSiblings;
     ST_DOMTREE() : pSiblings(nullptr), pChild(nullptr) {}
-    ~ST_DOMTREE() { if (pSiblings != nullptr) { delete pSiblings; pSiblings = nullptr; } if (pChild != nullptr) { delete pChild; pChild = nullptr; } }
+    ~ST_DOMTREE() { if (pChild != nullptr) { ST_DOMTREE* ch = pChild;  pChild = nullptr;  delete ch; } if (pSiblings != nullptr) { ST_DOMTREE* sib = pSiblings;  pSiblings = nullptr; delete sib; } }
 };
 
 struct ST_TABLE_ELEMENT
@@ -200,6 +202,7 @@ struct ST_Statistics
     std::string file_anchor;
 };
 
+#ifdef RECURSIVLY_DEFINED
 ST_DOMTREE* findtag(HTML_TAG tag, ST_DOMTREE* proot)
 {
     ST_DOMTREE* result = nullptr;
@@ -216,13 +219,51 @@ ST_DOMTREE* findtag(HTML_TAG tag, ST_DOMTREE* proot)
         else
         {
             result = proot;
+        }
+    }
+    return result;
+}
+#else
+ST_DOMTREE* findtag(HTML_TAG tag, ST_DOMTREE* proot)
+{
+    ST_DOMTREE* result = nullptr;
+    std::stack<ST_DOMTREE*> level;
+
+    while ((proot != nullptr) && (result == nullptr))
+    {
+        if (proot->content.tag != tag)
+        {
+            if (proot->pChild != nullptr)
+            {
+                level.push(proot);
+                proot = proot->pChild;
+            }
+            else if (proot->pSiblings != nullptr)
+            {
+                proot = proot->pSiblings;
+            }
+            else
+            {
+                proot = nullptr;
+                while ((level.size()>0) && (proot==nullptr))
+                {
+                    proot = level.top();
+                    level.pop();
+                    proot = proot->pSiblings;
+                }
+            }
+        }
+        else
+        {
+            result = proot;
             break;
         }
     }
     return result;
 }
+#endif
 
-
+#ifdef RECURSIVLY_DEFINED
 ST_TABLE_ELEMENT* findtag(HTML_TAG tag, ST_TABLE_ELEMENT* proot)
 {
     ST_TABLE_ELEMENT* result = nullptr;
@@ -244,7 +285,46 @@ ST_TABLE_ELEMENT* findtag(HTML_TAG tag, ST_TABLE_ELEMENT* proot)
     }
     return result;
 }
+#else
+ST_TABLE_ELEMENT* findtag(HTML_TAG tag, ST_TABLE_ELEMENT* proot)
+{
+    ST_TABLE_ELEMENT* result = nullptr;
+    std::stack<ST_TABLE_ELEMENT*> level;
+    while ((proot != nullptr) && (result == nullptr))
+    {
+        if (proot->tag != tag)
+        {
+            if (proot->pSub != nullptr)
+            {
+                level.push(proot);
+                proot = proot->pSub;
+            }
+            else if (proot->pNext != nullptr)
+            {
+                proot = proot->pNext;
+            }
+            else
+            {
+                proot = nullptr;
+                while ((level.size() > 0) && (proot == nullptr))
+                {
+                    proot = level.top();
+                    level.pop();
+                    proot = proot->pNext;
+                }
+            }
+        }
+        else
+        {
+            result = proot;
+            break;
+        }
+    }
+    return result;
+}
+#endif
 
+#ifdef RECURSIVLY_DEFINED
 void findalltags(HTML_TAG tag, ST_TABLE_ELEMENT* proot, std::vector<ST_TABLE_ELEMENT*>& related_elements)
 {
     const auto get_tags = [](ST_TABLE_ELEMENT* proot, const HTML_TAG tag, std::vector<ST_TABLE_ELEMENT*>& related_elements) ->void
@@ -266,7 +346,45 @@ void findalltags(HTML_TAG tag, ST_TABLE_ELEMENT* proot, std::vector<ST_TABLE_ELE
         proot = proot->pNext;
     }
 }
+#else
+void findalltags(HTML_TAG tag, ST_TABLE_ELEMENT* proot, std::vector<ST_TABLE_ELEMENT*>& related_elements)
+{
+    const auto get_tags = [](ST_TABLE_ELEMENT* proot, const HTML_TAG tag, std::vector<ST_TABLE_ELEMENT*>& related_elements) ->void
+    {
+        if (tag == proot->tag)
+        {
+            related_elements.push_back(proot);
+        }
+    };
+    std::stack<ST_TABLE_ELEMENT*> level;
+    while (proot != nullptr)
+    {
+        get_tags(proot, tag, related_elements);
 
+        if (proot->pSub != nullptr)
+        {
+            level.push(proot);
+            proot = proot->pSub;
+        }
+        else if (proot->pNext)
+        {
+            proot = proot->pNext;
+        }
+        else
+        {
+            proot = nullptr;
+            while ((level.size() > 0) && (proot == nullptr))
+            {
+                proot = level.top();
+                level.pop();
+                proot = proot->pNext;
+            }
+        }
+    }
+}
+#endif
+
+#ifdef RECURSIVLY_DEFINED
 ST_TABLE_ELEMENT* findcontent(const std::string& content, ST_TABLE_ELEMENT* proot)
 {
     ST_TABLE_ELEMENT* result = nullptr;
@@ -288,7 +406,47 @@ ST_TABLE_ELEMENT* findcontent(const std::string& content, ST_TABLE_ELEMENT* proo
     }
     return result;
 }
+#else
+ST_TABLE_ELEMENT* findcontent(const std::string& content, ST_TABLE_ELEMENT* proot)
+{
+    ST_TABLE_ELEMENT* result = nullptr;
+    std::stack<ST_TABLE_ELEMENT*> level;
 
+    while ((proot != nullptr) && (result == nullptr))
+    {
+        if (proot->content != content)
+        {
+            if (proot->pSub != nullptr)
+            {
+                level.push(proot);
+                proot = proot->pSub;
+            }
+            else if (proot->pNext)
+            {
+                proot = proot->pNext;
+            }
+            else
+            {
+                proot = nullptr;
+                while ((level.size() > 0) && (proot == nullptr))
+                {
+                    proot = level.top();
+                    level.pop();
+                    proot = proot->pNext;
+                }
+            }
+        }
+        else
+        {
+            result = proot;
+            break;
+        }
+    }
+    return result;
+}
+#endif
+
+#ifdef RECURSIVLY_DEFINED
 void findallcontent(const std::string& content, ST_TABLE_ELEMENT* proot, std::vector<ST_TABLE_ELEMENT*>& related_content)
 {
     const auto get_content = [](ST_TABLE_ELEMENT* proot, const std::string& content, std::vector<ST_TABLE_ELEMENT*>& related_content) ->void
@@ -310,7 +468,46 @@ void findallcontent(const std::string& content, ST_TABLE_ELEMENT* proot, std::ve
         proot = proot->pNext;
     }
 }
+#else
+void findallcontent(const std::string& content, ST_TABLE_ELEMENT* proot, std::vector<ST_TABLE_ELEMENT*>& related_content)
+{
+    const auto get_content = [](ST_TABLE_ELEMENT* proot, const std::string& content, std::vector<ST_TABLE_ELEMENT*>& related_content) ->void
+    {
+        if (content == proot->content)
+        {
+            related_content.push_back(proot);
+        }
+    };
 
+    std::stack<ST_TABLE_ELEMENT*> level;
+    while (proot != nullptr)
+    {
+        get_content(proot, content, related_content);
+
+        if (proot->pSub != nullptr)
+        {
+            level.push(proot);
+            proot = proot->pSub;
+        }
+        else if (proot->pNext)
+        {
+            proot = proot->pNext;
+        }
+        else
+        {
+            proot = nullptr;
+            while ((level.size() > 0) && (proot == nullptr))
+            {
+                proot = level.top();
+                level.pop();
+                proot = proot->pNext;
+            }
+        }
+    }
+}
+#endif
+
+#ifdef RECURSIVLY_DEFINED
 ST_TABLE_ELEMENT* findattribute(const std::string& attrib_name, const std::string& attrib_value, ST_TABLE_ELEMENT* proot)
 {
     ST_TABLE_ELEMENT* result = nullptr;
@@ -345,7 +542,58 @@ ST_TABLE_ELEMENT* findattribute(const std::string& attrib_name, const std::strin
     }
     return result;
 }
+#else
+ST_TABLE_ELEMENT* findattribute(const std::string& attrib_name, const std::string& attrib_value, ST_TABLE_ELEMENT* proot)
+{
+    ST_TABLE_ELEMENT* result = nullptr;
+    const auto get_attribute = [](ST_TABLE_ELEMENT* proot, const std::string& attrib_name, const std::string& attrib_value) -> bool
+    {
+        bool retVal = false;
+        const auto attrib = proot->attributes.find(attrib_name);
+        bool key_exists = (attrib != proot->attributes.cend());
+        if (key_exists)
+        {
+            retVal = attrib->second == attrib_value;
+        }
+        return retVal;
+    };
 
+    std::stack<ST_TABLE_ELEMENT*> level;
+    while ((proot != nullptr) && (result == nullptr))
+    {
+        if (get_attribute(proot, attrib_name, attrib_value))
+        {
+            if (proot->pSub != nullptr)
+            {
+                level.push(proot);
+                proot = proot->pSub;
+            }
+            else if (proot->pNext)
+            {
+                proot = proot->pNext;
+            }
+            else
+            {
+                proot = nullptr;
+                while ((level.size() > 0) && (proot == nullptr))
+                {
+                    proot = level.top();
+                    level.pop();
+                    proot = proot->pNext;
+                }
+            }
+        }
+        else
+        {
+            result = proot;
+            break;
+        }
+    }
+    return result;
+}
+#endif
+
+#ifdef RECURSIVLY_DEFINED
 void findallattributes(const std::string& attrib_name, const std::string& attrib_value, ST_TABLE_ELEMENT* proot, std::vector<ST_TABLE_ELEMENT*>& related_content)
 {
     const auto get_attributes = [](ST_TABLE_ELEMENT* proot, const std::string& attrib_name, const std::string& attrib_value, std::vector<ST_TABLE_ELEMENT*>& related_content) ->void
@@ -375,6 +623,50 @@ void findallattributes(const std::string& attrib_name, const std::string& attrib
         proot = proot->pNext;
     }
 }
+#else
+void findallattributes(const std::string& attrib_name, const std::string& attrib_value, ST_TABLE_ELEMENT* proot, std::vector<ST_TABLE_ELEMENT*>& related_content)
+{
+    const auto get_attributes = [](ST_TABLE_ELEMENT* proot, const std::string& attrib_name, const std::string& attrib_value, std::vector<ST_TABLE_ELEMENT*>& related_content) ->void
+    {
+        const auto attrib = proot->attributes.find(attrib_name);
+        bool key_exists = (attrib != proot->attributes.cend());
+        if (key_exists)
+        {
+            key_exists = attrib->second == attrib_value;
+            if (key_exists == true)
+            {
+                related_content.push_back(proot);
+            }
+        }
+    };
+
+    std::stack<ST_TABLE_ELEMENT*> level;
+    while (proot != nullptr)
+    {
+        get_attributes(proot, attrib_name, attrib_value, related_content);
+
+        if (proot->pSub != nullptr)
+        {
+            level.push(proot);
+            proot = proot->pSub;
+        }
+        else if (proot->pNext)
+        {
+            proot = proot->pNext;
+        }
+        else
+        {
+            proot = nullptr;
+            while ((level.size() > 0) && (proot == nullptr))
+            {
+                proot = level.top();
+                level.pop();
+                proot = proot->pNext;
+            }
+        }
+    }
+}
+#endif
 
 void show_all_nodes(size_t depth, ST_TABLE_ELEMENT* proot)
 {
@@ -2200,9 +2492,36 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
                 }
                 if (retVal == true)
                 {
-                    new_index_file += source.index_file.html.substr(last_pos);
+                    static const std::string annotation_remarks = ST_HTML_ANNOTATION::GetContent();
+                    tree = findtag(HTML_TAG::EN_HEADING, tree);
+                    if (tree != nullptr)
+                    {
+                        const size_t length = (tree->content.matching_pos != std::string::npos) && (tree->content.matching_pos > last_pos)? (tree->content.matching_pos - last_pos) : std::string::npos;
+                        if (length != std::string::npos)
+                        {
+                            new_index_file += source.index_file.html.substr(last_pos, length);
+                            new_index_file += annotation_remarks;
+                            const size_t length = (tree->content.terminating_pos != std::string::npos) && (tree->content.terminating_pos > tree->content.matching_pos) ? (tree->content.terminating_pos - last_pos) : std::string::npos;
+                            new_index_file += source.index_file.html.substr(tree->content.matching_pos, length);
+                            if (length != std::string::npos)
+                            {
+                                new_index_file += CClangOneVersion::GetVersion();
+                                new_index_file += source.index_file.html.substr(tree->content.terminating_pos);
+                            }
+                            
+                        }
+                        else
+                        {
+                            new_index_file += source.index_file.html.substr(last_pos);
+                        }
+                    }
+                    else
+                    {
+                        new_index_file += source.index_file.html.substr(last_pos);
+                    }
+                   
+                   
                     std::string dest_file;
-
                     if (annotated_index_file.size())
                     {
                         dest_file = root + annotated_index_file;

@@ -118,13 +118,13 @@
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(BOOST_HOME);$(ProjectDir)\gumbo-parser\src;$(ProjectDir)\lexbor\source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
-      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(BOOST_HOME)\bin\x64\lib;$(ProjectDir)\gumbo-parser\visualc\x64\Debug;$(ProjectDir)\lexbor\build\Debug</AdditionalLibraryDirectories>
-      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;gumbo.lib;lexbor.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(BOOST_HOME)\bin\x64\lib</AdditionalLibraryDirectories>
+      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>copy $(ProjectDir)lexbor\build\Debug\lexbor.dll $(Project)x64\Debug</Command>
@@ -147,21 +147,25 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(BOOST_HOME)\bin\x64\lib;$(ProjectDir)\gumbo-parser\visualc\x64\Release;$(ProjectDir)\lexbor\build\Release</AdditionalLibraryDirectories>
-      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;gumbo.lib;lexbor_static.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(BOOST_HOME)\bin\x64\lib</AdditionalLibraryDirectories>
+      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>copy $(ProjectDir)lexbor\build\Release\lexbor.dll $(Project)x64\Release</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="annotation_remarks.cpp" />
     <ClCompile Include="CCAnnotator.cpp" />
     <ClCompile Include="pugixml\src\pugixml.cpp" />
+    <ClCompile Include="VersionInfo.cpp" />
     <ClCompile Include="xmlparser.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="annotation_remarks.h" />
     <ClInclude Include="pugixml\src\pugiconfig.hpp" />
     <ClInclude Include="pugixml\src\pugixml.hpp" />
+    <ClInclude Include="VersionInfo.h" />
     <ClInclude Include="xmlparser.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

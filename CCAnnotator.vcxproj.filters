@@ -36,6 +36,12 @@
     <ClCompile Include="xmlparser.cpp">
       <Filter>Quelldateien</Filter>
     </ClCompile>
+    <ClCompile Include="annotation_remarks.cpp">
+      <Filter>Quelldateien</Filter>
+    </ClCompile>
+    <ClCompile Include="VersionInfo.cpp">
+      <Filter>Quelldateien</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pugixml\src\pugiconfig.hpp">
@@ -46,6 +52,12 @@
     </ClInclude>
     <ClInclude Include="xmlparser.h">
       <Filter>Quelldateien</Filter>
+    </ClInclude>
+    <ClInclude Include="annotation_remarks.h">
+      <Filter>pugixml\header</Filter>
+    </ClInclude>
+    <ClInclude Include="VersionInfo.h">
+      <Filter>pugixml\header</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
