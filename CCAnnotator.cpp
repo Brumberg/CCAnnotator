@@ -21,9 +21,9 @@ int main(int ac, char** av) {
             ("annotated_index_file", po::value<std::string>()->default_value("annotated_index.html"), "specifies the root index file")
             ("index_folder", po::value<std::string>()->default_value("./code_coverage_report"), "specifies the index folder")
             ("source_folder", po::value<std::string>()->default_value(".", "specifies the corresponding source folder"))
-            ("patch_sourcefile", po::value<std::string>()->default_value("false"), "specifies the sourcefile to update")
+            ("patch_source_file", po::value<std::string>()->default_value("false"), "specifies the sourcefile to update")
             ("annotate_html", po::value<std::string>()->default_value("true"), "annotate the html file")
-            ("rel_file_path", po::value<std::string>()->default_value("."), "specifies a relative path to mirror the same structure")
+            ("annotated_html_folder", po::value<std::string>()->default_value("./code_coverage_report"), "specifies a relative path to the annotated files")
             ("cc_ignore", po::value<std::string>()->default_value("LLVM_COV_EXCLUDE_LINE"), "specifies the default flag to ignore the line");
 
         po::variables_map vm;
@@ -49,10 +49,10 @@ int main(int ac, char** av) {
             parameters["annotated_index_file"] = vm["annotated_index_file"].as<std::string>();
             parameters["index_folder"] = vm["index_folder"].as<std::string>();
             parameters["source_folder"] = vm["source_folder"].as<std::string>();
-            parameters["patch_sourcefile"] = vm["patch_sourcefile"].as<std::string>();
+            parameters["patch_source_file"] = vm["patch_source_file"].as<std::string>();
             parameters["annotate_html"] = vm["annotate_html"].as<std::string>();
             parameters["cc_ignore"] = vm["cc_ignore"].as<std::string>();
-            parameters["rel_file_path"] = vm["rel_file_path"].as<std::string>();
+            parameters["annotated_html_folder"] = vm["annotated_html_folder"].as<std::string>();
             const std::string source = vm["index_file"].as<std::string>();
             retVal = build_node_tree(source, parameters);
 
