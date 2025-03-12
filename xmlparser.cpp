@@ -1974,6 +1974,7 @@ static bool load_html_code(const std::string& root, std::vector<ST_TextAttribute
                 abs_file_path = match[1].str();
             }
             const std::string root_file = root + abs_file_path;
+            std::cout << "\033[1;32mProcessing: \033[0m" << root_file << std::endl;
             std::string content;
             retVal &= open_html_file(root_file, content);
             if (retVal)
