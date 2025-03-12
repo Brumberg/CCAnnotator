@@ -1297,7 +1297,7 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
 {
     const auto check_if_bracket = [](std::string& code) -> bool
     {
-        static const std::regex no_content(R"(<\s*span\s*class\s*=\s*'red'[^>]*>\s*(?:\{|\}|else){1}\s*(//)?|<\s*pre\s*>\s*else\s*(//)?)");//
+        static const std::regex no_content(R"(<\s*span\s*class\s*=\s*'red'[^>]*>\s*(?:\{|\}|else){1}\s*(//)?|<\s*pre\s*>\s*else\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*#ifndef\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*#ifdef\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*#if\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*#endif\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*typedef\s*(//)?)");//
         std::smatch match;
         return std::regex_search(code, match, no_content);
     };
