@@ -1297,7 +1297,7 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
 {
     const auto check_if_bracket = [](std::string& code) -> bool
     {
-        static const std::regex no_content(R"(<\s*span\s*class\s*=\s*'red'[^>]*>\s*(?:\{|\}|else){1}\s*(//)?|<\s*pre\s*>\s*else\s*(//)?)");
+        static const std::regex no_content(R"(<\s*span\s*class\s*=\s*'red'[^>]*>\s*(?:\{|\}|else){1}\s*(//)?|<\s*pre\s*>\s*else\s*(//)?)");//
         std::smatch match;
         return std::regex_search(code, match, no_content);
     };
@@ -1388,42 +1388,36 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                 {
                     bool expr_line_result = false;
                     bool potentially_unexecutable_code = false;
+                    bool covered_line = false;
                     ST_DOMTREE* lock_ahead = tree->pChild;
                     while (lock_ahead)
                     {
-                        static const std::regex expr_code(R"(class\s*=\s*'code')");
-                        //static const std::regex expr_line(R"(class\s*=\s*'uncovered-line')");
+                        static const std::regex expr_line(R"(class\s*=\s*'covered-line')");
                         const size_t length = lock_ahead->content.terminating_pos == std::string::npos ? std::string::npos : lock_ahead->content.terminating_pos - lock_ahead->content.matching_pos;
                         std::string block = content.substr(lock_ahead->content.matching_pos, length);
-                        /*expr_line_result = std::regex_search(block, match, expr_line);
+                        expr_line_result = std::regex_search(block, match, expr_line);
                         if (expr_line_result == true)
                         {
-                            static const std::regex expr_real_uncovered_line(R"(<\s*?td\s*?class\s*?=\s*?'uncovered-line'><pre>(0)</pre><\s*?/td\s*?>)");
-                            expr_line_result = std::regex_search(block, match, expr_line);
-                            if (expr_line_result)
-                            {
-                                //check for else
-                                potentially_unexecutable_code = true;
-                            }
-                        }
-                        else
-                        {*/
-
-                        bool start_found = std::regex_search(block, match, expr_code);
-
-                        if (start_found == true)
-                        {
-                            if (check_if_bracket(block))
-                            {
-                                annotation_string = "E0";
-                                additional_remarks = "not executable";
-                                annotation = annotation_string;
-                                is_plain_line = true;
-                            }
-
+                            covered_line = true;
                             break;
                         }
-                        //}
+                        else
+                        {
+                            static const std::regex expr_code(R"(class\s*=\s*'code')");
+                            bool start_found = std::regex_search(block, match, expr_code);
+                            if (start_found == true)
+                            {
+                                if (check_if_bracket(block))
+                                {
+                                    annotation_string = "E0";
+                                    additional_remarks = "not executable";
+                                    annotation = annotation_string;
+                                    is_plain_line = true;
+                                }
+
+                                break;
+                            }
+                        }
                         lock_ahead = lock_ahead->pSiblings;
                     }
                 }
@@ -1794,6 +1788,10 @@ static bool write_html_file(const std::string& file_name, const std::string& con
                 << ex.what();
             retVal = false;
         }
+    }
+    else
+    {
+        std::cerr << "Unable to create HTML file." << std::endl;
     }
     return retVal;
 }
@@ -2225,6 +2223,7 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
     const bool save_code_as_different_file = parameter["create_new_sourcefiles"] == "true";
     const std::string src_extension = parameter["sourcefile_modifier"];
     const std::string annotated_index_file = parameter["annotated_index_file"];
+    const std::string annotated_html_folder = parameter["annotated_html_folder"];
     size_t file_no = 0;
     //unordered_map<std::string, > statistics;
     std::unordered_map<std::string, ST_Statistics> statistics;
@@ -2259,6 +2258,7 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
                 if (file_found)
                 {
                     std::string annotated_filename = match[1].str() + "_anno.html";
+                    std::string annotated_file_anchor = annotated_filename;
                     i.references["annotated_src"] = annotated_filename;
                     static const std::regex file_name_capture(R"(.*[\\/]([^\\/]+\.html$))");
                     if (std::regex_search(annotated_filename, match, file_name_capture))
@@ -2271,11 +2271,30 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
                         size_t remove_root = annotated_filename.find(root);
                         if (remove_root != std::string::npos)
                         {
-                            annotated_filename = "./" + annotated_filename.substr(remove_root + root.length());
+                            annotated_file_anchor = annotated_filename.substr(remove_root + root.length());
+                            const size_t pos1 = annotated_html_folder.find("./");
+                            const size_t pos2 = annotated_html_folder.find(".\\");
+                            std::string loc_annotated_html_folder;
+                            if (pos1 == 0 || pos2 == 0)
+                            {
+                                loc_annotated_html_folder = annotated_html_folder.substr(2);
+                            }
+                            else
+                            {
+                                loc_annotated_html_folder = annotated_html_folder;
+                            }
+                            //annotated_filename = loc_annotated_html_folder + annotated_filename;
+                            annotated_file_anchor = "./" + annotated_file_anchor;
+                        }
+                        else
+                        {
+                            annotated_file_anchor = annotated_html_folder + annotated_filename;
+                            //annotated_filename = annotated_html_folder + annotated_filename;
+                            annotated_file_anchor = "./" + annotated_file_anchor;
                         }
                     }
-                    stats.file_name = file_name;
-                    stats.file_anchor = annotated_filename;
+                    stats.file_name = annotated_filename;
+                    stats.file_anchor = annotated_file_anchor;
                 }
                 else
                 {
@@ -2286,7 +2305,7 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
                     stats.file_anchor = file_name;
                 }
 
-                retVal = patch_html_file(content, stats.file_anchor, stats);
+                retVal = patch_html_file(content, stats.file_name, stats);
                 if (retVal == true)
                 {
                     statistics[i.references["href"]] = stats;
@@ -2735,7 +2754,7 @@ bool build_node_tree(std::string source, std::unordered_map<std::string, std::st
                             retVal = load_html_code(root, content.attributes, source_tree);
                             if (retVal == true)
                             {
-                                if (parameter["patch_sourcefile"] == "true")
+                                if (parameter["patch_source_file"] == "true")
                                 {
                                     retVal = save_and_annotate_source_code(parameter, source_code, source_tree);
                                     if (retVal == true)
