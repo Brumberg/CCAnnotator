@@ -1338,7 +1338,7 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
     std::unordered_map<size_t, size_t> dict_remaining_uncovered_lines;
 
     //static const std::regex annotation_pattern(R"(//.*?&lt;cov\s+class=&apos;(A\d)&apos;&gt;(.*?)&lt;\s*/cov\s*&gt;)");
-    static const std::regex annotation_pattern(R"(//.*?ccov:\s+(A\d{1})(?:\b.*&lt;\s*([^&]+)\s*&gt;)*)");
+    static const std::regex annotation_pattern(R"(//.*?ccov:\s+(A[\d{1}E])(?:\b.*&lt;\s*([^&]+)\s*&gt;)*)");
 
     while (tree != nullptr)
     {
