@@ -1297,7 +1297,7 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
 {
     const auto check_if_bracket = [](std::string& code) -> bool
     {
-        static const std::regex no_content(R"(<\s*span\s*class\s*=\s*'red'[^>]*>\s*(?:\{|\}|else){1}\s*(//)?|<\s*pre\s*>\s*else\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*#ifndef\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*#ifdef\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*#if\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*#endif\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*typedef\s*(//)?)");//
+        static const std::regex no_content(R"(<\s*span\s*class\s*=\s*'red'[^>]*>\s*(?:\{|\}|else|case\s+\w+\s*:|break\s*;|break\s*<\s*/span\s*>\s*;|default\s*:){1}\s*(//)?|<\s*pre\s*>\s*else\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*#ifndef\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*#ifdef\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*#if\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*#endif\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*typedef\s*(//)?)");//
         std::smatch match;
         return std::regex_search(code, match, no_content);
     };
@@ -1487,7 +1487,7 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                     static const std::regex expr_uncovered_line(R"(class='uncovered-line')");
                     static const std::regex expr_real_uncovered_line(R"(<\s*?td\s*?class\s*?=\s*?'uncovered-line'><pre>(0)</pre><\s*?/td\s*?>)");
                     static const std::regex expr_code(R"(class='code')");
-                    static const std::regex exception_code(R"([AE]?[0-7])");
+                    static const std::regex exception_code(R"(([AE]?[0-7])|AE)");
                     std::string exp = tree->content.match[0].str();
                     bool found_start = std::regex_search(exp, match, expr_line_no);
                     if (found_start)
