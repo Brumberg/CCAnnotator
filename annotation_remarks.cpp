@@ -1,6 +1,6 @@
 #include "annotation_remarks.h"
 
-const std::string ST_HTML_ANNOTATION::m_c8Annotation = R"(<p><h3>Legend</h3></p>
+const std::string ST_HTML_ANNOTATION::m_c8Annotation = R"(<h3>Legend</h3>
 <div class="centered">
 <table>
 <tbody>

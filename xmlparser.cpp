@@ -1403,19 +1403,29 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                         }
                         else
                         {
-                            static const std::regex expr_code(R"(class\s*=\s*'code')");
-                            bool start_found = std::regex_search(block, match, expr_code);
-                            if (start_found == true)
+                            static const std::regex empty_uncovered_line(R"(<td class\s*=\s*'uncovered-line'[^>]*>\s*<\s*/td\s*>)");
+                            bool empty_uncovered_line_found = std::regex_search(block, match, empty_uncovered_line);
+                            if (empty_uncovered_line_found)//uncovered line but not touched -> means it is not zero -> maybe better to check for color?
                             {
-                                if (check_if_bracket(block))
-                                {
-                                    annotation_string = "E0";
-                                    additional_remarks = "not executable";
-                                    annotation = annotation_string;
-                                    is_plain_line = true;
-                                }
-
+                                covered_line = true;
                                 break;
+                            }
+                            else
+                            {
+                                static const std::regex expr_code(R"(class\s*=\s*'code')");
+                                bool start_found = std::regex_search(block, match, expr_code);
+                                if (start_found == true)
+                                {
+                                    if (check_if_bracket(block))
+                                    {
+                                        annotation_string = "E0";
+                                        additional_remarks = "not executable";
+                                        annotation = annotation_string;
+                                        is_plain_line = true;
+                                    }
+
+                                    break;
+                                }
                             }
                         }
                         lock_ahead = lock_ahead->pSiblings;
