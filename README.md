@@ -8,3 +8,12 @@ The process is automated by the command line script create_tags.cmd. You just ha
 
 To update the submodules use:
 git submodule update --init --recursive
+
+Activating code coverage with clang-cl could be tricky. 
+Specify the flags
+-fprofile-instr-generate -fcoverage-mapping 
+in the compiler settings.
+
+Call  
+$env:LLVM_PROFILE_FILE="coverage.profraw"; & ".\x64\Unit Test - Release\P300_SignalProcessing.exe"
+from the root project directory
