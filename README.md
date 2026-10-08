@@ -17,3 +17,11 @@ in the compiler settings.
 Call  
 $env:LLVM_PROFILE_FILE="coverage.profraw"; & ".\x64\Unit Test - Release\P300_SignalProcessing.exe"
 from the root project directory
+
+Create new data file
+lvm-profdata merge -sparse coverage.profraw -o coverage.profdata
+
+Create/show a record of all executed tests:
+llvm-cov report "./x64/Unit Test - Release/P300_SignalProcessing.exe" -instr-profile="coverage.profdata"
+
+Filename                                       Regions    Missed Regions     Cover   Functions  Missed Functions  Executed       Lines      Missed Lines     Cover    Branches   Missed Branches     Cover
