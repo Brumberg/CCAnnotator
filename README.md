@@ -25,3 +25,15 @@ Create/show a record of all executed tests:
 llvm-cov report "./x64/Unit Test - Release/P300_SignalProcessing.exe" -instr-profile="coverage.profdata"
 
 Filename                                       Regions    Missed Regions     Cover   Functions  Missed Functions  Executed       Lines      Missed Lines     Cover    Branches   Missed Branches     Cover
+
+Create report:
+llvm-cov show ".\P300_SignalProcessing.exe" -instr-profile=".\coverage.profdata" -format=html -output-dir="coverage_ProcessData" "ProcessData.cpp"
+
+or for multiple file:
+
+llvm-cov show ".\P300_SignalProcessing.exe" `
+    -instr-profile=".\coverage.profdata" `
+    -format=html `
+    -output-dir="coverage_report" `
+    "ProcessData.cpp" `
+    "OtherFile.cpp"
