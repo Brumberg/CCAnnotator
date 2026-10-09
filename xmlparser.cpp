@@ -1817,7 +1817,7 @@ static bool write_html_file(const std::string& file_name, const std::string& con
 static bool build_relative_paths(std::vector<ST_TextAttributes>& attributes)
 {
     const std::filesystem::path path = std::filesystem::current_path();
-    const std::string rel_path(reinterpret_cast<const char*>(path.c_str()));
+    const std::string rel_path = path.string();
 
     for (auto& i : attributes)
     {
