@@ -5,6 +5,7 @@
 #include <string>
 #include <locale>
 #include "xmlparser.h"
+#define BOOST_ALL_NO_LIB
 #include <boost/program_options.hpp>
 
 int main(int ac, char** av) {

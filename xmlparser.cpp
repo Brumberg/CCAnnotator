@@ -762,7 +762,7 @@ static bool build_full_dom_tree(ST_HTMLContent& parser, ST_TABLE_ELEMENT*& ptabl
             break;
         }
 
-        static const std::regex attrib_pattern(R"(([^\s]+)\s*=\s*([^\s]+))");
+        static const std::regex attrib_pattern(R"(([^\s=]+)\s*=\s*(['"])(.*?)\2)");
         if (sub_attributes == true)
         {
             content = match_subattributes[2].str();
@@ -771,7 +771,7 @@ static bool build_full_dom_tree(ST_HTMLContent& parser, ST_TABLE_ELEMENT*& ptabl
 
             std::string::const_iterator searchStart = attribute.cbegin();
             while (std::regex_search(searchStart, attribute.cend(), attr_match, attrib_pattern)) {
-                attributes[attr_match[1].str()] = attr_match[2].str();
+                attributes[attr_match[1].str()] = attr_match[3].str();
                 searchStart = attr_match.suffix().first;
             }
         }
@@ -1297,7 +1297,11 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
 {
     const auto check_if_bracket = [](std::string& code) -> bool
     {
-        static const std::regex no_content(R"(<\s*span\s*class\s*=\s*'red'[^>]*>\s*(?:\{|\}|else|case\s+\w+\s*:|break\s*;|break\s*<\s*/span\s*>\s*;|default\s*:){1}\s*(//)?|<\s*pre\s*>\s*else\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*#ifndef\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*#ifdef\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*#if\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*#endif\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*typedef\s*(//)?)");//
+        //static const std::regex no_content(R"(<\s*span\s*class\s*=\s*'red'[^>]*>\s*(?:\{|\}|else|case\s+\w+\s*:|break\s*;|break\s*<\s*/span\s*>\s*;|default\s*:){1}\s*(//)?|<\s*pre\s*>\s*else\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*#ifndef\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*#ifdef\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*#if\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*#endif\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*typedef\s*(//)?)");//
+        static const std::regex no_content(
+            R"(<\s*span\s*class\s*=\s*'[^']*\bred\b[^']*'[^>]*>\s*(?:\{|\}|else|case\s+\w+\s*:|break\s*;|break\s*<\s*/span\s*>\s*;|default\s*:)\s*(?://)?|<\s*pre\s*>\s*else\s*(?://)?|<\s*pre\s*><span\s+class\s*=\s*'[^']*\bred\b[^']*'\s*>\s*#ifndef\s*(?://)?|<\s*pre\s*><span\s+class\s*=\s*'[^']*\bred\b[^']*'\s*>\s*#ifdef\s*(?://)?|<\s*pre\s*><span\s+class\s*=\s*'[^']*\bred\b[^']*'\s*>\s*#if\s*(?://)?|<\s*pre\s*><span\s+class\s*=\s*'[^']*\bred\b[^']*'\s*>\s*#endif\s*(?://)?|<\s*pre\s*><span\s+class\s*=\s*'[^']*\bred\b[^']*'\s*>\s*typedef\s*(?://)?)"
+        );
+
         std::smatch match;
         return std::regex_search(code, match, no_content);
     };
@@ -1497,6 +1501,7 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                     static const std::regex expr_uncovered_line(R"(class='uncovered-line')");
                     static const std::regex expr_real_uncovered_line(R"(<\s*?td\s*?class\s*?=\s*?'uncovered-line'><pre>(0)</pre><\s*?/td\s*?>)");
                     static const std::regex expr_code(R"(class='code')");
+                    static const std::regex expr_skipped_line(R"(class='skipped-line')");
                     static const std::regex exception_code(R"(([AE]?[0-7])|AE)");
                     std::string exp = tree->content.match[0].str();
                     bool found_start = std::regex_search(exp, match, expr_line_no);
@@ -1555,16 +1560,16 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                         additional_remarks = "";
                     }
 #else
-                    found_start = std::regex_search(exp, match, expr_code);
+                    found_start = std::regex_search(exp, match, expr_code) && !std::regex_search(exp, match, expr_skipped_line);
+
                     if (found_start)
                     {
                         const size_t length = tree->content.terminating_pos == std::string::npos ? std::string::npos : tree->content.terminating_pos - latest_hit;
                         std::string code_row = content.substr(latest_hit, tree->content.terminating_pos - latest_hit);
-
                         bool bracket_check = check_if_bracket(code_row);
                         if (annotated_code || bracket_check)
                         {
-                            static const std::regex class_red(R"(<\s*span\s*class\s*=\s*'red')");
+                            static const std::regex class_red(R"(<\s*span\s+class\s*=\s*'[^']*\bred\b[^']*'[^>]*>)");
                             if (bracket_check==false)
                             {
                                 static const std::string class_cyan = "<span class='cyan'";
@@ -1572,7 +1577,7 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                             }
                             else
                             {
-                                static const std::regex no_content(R"(<\s*span\s*class\s*=\s*'red'[^>]*>(.*?)<\s*/span\s*>)");
+                                static const std::regex no_content(R"(<\s*span\s+class\s*=\s*'[^']*\bred\b[^']*'[^>]*>(.*?)<\s*/span\s*>)");
                                 std::smatch match;
                                 if (std::regex_search(code_row, match, no_content))
                                 {
@@ -1814,16 +1819,16 @@ static bool write_html_file(const std::string& file_name, const std::string& con
 \param[out]     void
 \return         -
 *//*-------------------------------------------------------------------------------------------*/
-static bool build_relative_paths(std::vector<ST_TextAttributes>& attributes)
+static bool build_relative_paths(const std::string& root, std::vector<ST_TextAttributes>& attributes)
 {
-    const std::filesystem::path path = std::filesystem::current_path();
-    const std::string rel_path = path.string();
-
+    //const std::filesystem::path path = std::filesystem::current_path();
+    //const std::string rel_path = path.string();
+    const std::string& rel_path = root;
     for (auto& i : attributes)
     {
         if (i.references.find("href") != i.references.cend())
         {
-            std::string dummy = i.references["href"];
+            /*std::string dummy = i.references["href"];
             size_t ix = dummy.find(rel_path);
             if (ix != std::string::npos)
             {
@@ -1832,6 +1837,13 @@ static bool build_relative_paths(std::vector<ST_TextAttributes>& attributes)
                 ending_ = ending_ == std::string::npos ? dummy.size() : ending_;
                 dummy = dummy.substr(ix, ending_ - ix);
                 i.references["rel_file_path"] = dummy;
+                i.crlf = false;
+            }*/
+            std::cout << rel_path << i.references["href"] << std::endl;
+            const std::filesystem::path path = std::filesystem::path(rel_path+i.references["href"]).lexically_normal();
+            if (std::filesystem::is_regular_file(path))
+            {
+                i.references["rel_file_path"] = path.generic_string();
                 i.crlf = false;
             }
             else
@@ -1859,26 +1871,28 @@ static bool build_relative_paths(std::vector<ST_TextAttributes>& attributes)
 static bool dive_into_folder(const std::string& root_folder, std::vector<ST_TextAttributes>& attributes)
 {
     bool retVal = false;
-   
+    
+    const auto normalize_path = [](const std::string& value) -> const std::filesystem::path
+        {
+            return std::filesystem::path(value).lexically_normal().generic_string();
+        };
+
     try {
         for (auto& i : attributes)
         {
             if (i.references.find("rel_file_path") != i.references.cend() && i.references["rel_file_path"] != "")
             {
-                std::string rel_path = i.references["rel_file_path"];
-                size_t ix = rel_path.find_last_of("/\\");
-                std::string file_name = rel_path;
-                if (ix != std::string::npos)
-                { 
-                    file_name = file_name.substr(ix+1u);
-                }
+                std::filesystem::path rel_path = std::filesystem::path(i.references["rel_file_path"]);
+                std::string file_name = rel_path.filename().string();
                 
                 for (const auto& entry : std::filesystem::recursive_directory_iterator(root_folder)) {
-                    std::string filename = entry.path().filename().string();
+                    std::filesystem::path filename = normalize_path(entry.path().filename().string());
                     if (entry.is_regular_file() && entry.path().filename() == file_name) {
                         std::string file_id = std::filesystem::relative(entry.path()).string();
 
-                        if (file_id.find(rel_path) != std::string::npos)
+                        const std::string html_ref = rel_path.relative_path().generic_string();
+                        const std::string file_ref = std::filesystem::path(entry.path()).generic_string();
+                        if (file_ref.find(html_ref) != std::string::npos)
                         {
                             std::cout << "Found: " << entry.path().string() << std::endl;
                             i.references["src_file"] = entry.path().string();
@@ -1913,34 +1927,53 @@ static bool load_source_code(std::vector<ST_TextAttributes>& attributes, std::un
         {
             std::string& src_file = i.references["src_file"];
             try {
-                std::ifstream file(src_file);
+                std::ifstream file(src_file, std::ios::binary);
                 if (file.good())
                 {
-                    std::string line;
+                    std::string content{
+                        std::istreambuf_iterator<char>{file},
+                        std::istreambuf_iterator<char>{}
+                    };
+
                     std::vector<std::string> source_code;
-                    std::istream& ret = std::getline(file, line);
-                    if (ret.good())
+                    static const std::string line_start("<tr>");
+                    static const std::string line_terminator("</tr>");
+                    static const size_t preflen = line_start.size();
+                    static const size_t postlen = line_terminator.size();
+                    
+                    size_t prefix = content.find(line_start, 0);
+                    size_t postfix = content.find(line_terminator, prefix);
+                    size_t appendix = 0u;
+                    if (prefix != std::string::npos)
                     {
-                        if (!line.empty() && line.back() == '\r') {
-                            i.crlf = true;
-                            //std::cout << "Line ends with \\r\\n" << std::endl;
+                        source_code.push_back(content.substr(0, prefix));
+                        while (postfix != std::string::npos)
+                        {
+                            appendix = postfix + postlen;
+                            source_code.push_back(content.substr(prefix, appendix-prefix));
+                            prefix = content.find(line_start, postfix);
+                            postfix = content.find(line_terminator, prefix);
                         }
-                        else {
-                            i.crlf = false;
-                            //std::cout << "Line ends with \\n" << std::endl;
+                        if (prefix == std::string::npos)
+                        {
+                            source_code.push_back(content.substr(appendix));
                         }
-                        source_code.push_back(line);
-                        while (std::getline(file, line)) {
-                            source_code.push_back(line);
+                        else
+                        {
+                            retVal = false;
+                            std::cerr << "Invalid file format." << std::endl;
                         }
                     }
                     else
                     {
-                        std::cerr << "Souce file is empty" << std::endl;
+                        retVal = false;
+                        std::cerr << "Invalid file content" << std::endl;
                     }
-                    src_code[src_file] = source_code;
                     file.close();
-                    retVal &= true;
+                    if (retVal)
+                    {
+                        src_code[src_file]=source_code;
+                    }
                 }
                 else
                 {
@@ -2750,7 +2783,8 @@ bool build_node_tree(std::string source, std::unordered_map<std::string, std::st
             retVal = check_index_file(content.index_file, content.pIndexTableStruct, content.attributes);
             if (retVal == true)
             {
-                build_relative_paths(content.attributes);
+                build_relative_paths(root, content.attributes);
+                retVal = content.attributes.size() > 0u;
                 if (retVal == true)
                 {
                     retVal = dive_into_folder(parameter["source_folder"], content.attributes);
@@ -2784,6 +2818,10 @@ bool build_node_tree(std::string source, std::unordered_map<std::string, std::st
                             }
                         }
                     }
+                }
+                else
+                {
+                    std::cerr << "Unable to annotate files. Files not found." << std::endl;
                 }
             }
         }
