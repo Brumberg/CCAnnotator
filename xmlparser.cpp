@@ -1407,28 +1407,37 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                         }
                         else
                         {
-                            static const std::regex empty_uncovered_line(R"(<td class\s*=\s*'uncovered-line'[^>]*>\s*<\s*/td\s*>)");
-                            bool empty_uncovered_line_found = std::regex_search(block, match, empty_uncovered_line);
-                            if (empty_uncovered_line_found)//uncovered line but not touched -> means it is not zero -> maybe better to check for color?
+							static const std::regex skipped_line(R"(class\s*=\s*'skipped-line')");
+							bool skipped_line_found = std::regex_search(block, match, skipped_line);
+                            if (skipped_line_found)
                             {
                                 covered_line = true;
                                 break;
-                            }
+							}
                             else
                             {
-                                static const std::regex expr_code(R"(class\s*=\s*'code')");
-                                bool start_found = std::regex_search(block, match, expr_code);
-                                if (start_found == true)
+                                static const std::regex empty_uncovered_line(R"(<td class\s*=\s*'uncovered-line'[^>]*>\s*<\s*/td\s*>)");
+                                bool empty_uncovered_line_found = std::regex_search(block, match, empty_uncovered_line);
+                                if (empty_uncovered_line_found)//uncovered line but not touched -> means it is not zero -> maybe better to check for color?
                                 {
-                                    if (check_if_bracket(block))
-                                    {
-                                        annotation_string = "E0";
-                                        additional_remarks = "not executable";
-                                        annotation = annotation_string;
-                                        is_plain_line = true;
-                                    }
-
+                                    covered_line = true;
                                     break;
+                                }
+                                else
+                                {
+                                    static const std::regex expr_code(R"(class\s*=\s*'code')");
+                                    bool start_found = std::regex_search(block, match, expr_code);
+                                    if (start_found == true)
+                                    {
+                                        if (check_if_bracket(block))
+                                        {
+                                            annotation_string = "E0";
+                                            additional_remarks = "not executable";
+                                            annotation = annotation_string;
+                                            is_plain_line = true;
+                                        }
+                                        break;
+                                    }
                                 }
                             }
                         }
@@ -1560,20 +1569,40 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                         additional_remarks = "";
                     }
 #else
-                    found_start = std::regex_search(exp, match, expr_code) && !std::regex_search(exp, match, expr_skipped_line);
+                    const bool skip_line = std::regex_search(exp, match, expr_skipped_line);
+                    found_start = std::regex_search(exp, match, expr_code) && !skip_line;
 
                     if (found_start)
                     {
                         const size_t length = tree->content.terminating_pos == std::string::npos ? std::string::npos : tree->content.terminating_pos - latest_hit;
                         std::string code_row = content.substr(latest_hit, tree->content.terminating_pos - latest_hit);
+
                         bool bracket_check = check_if_bracket(code_row);
                         if (annotated_code || bracket_check)
                         {
-                            static const std::regex class_red(R"(<\s*span\s+class\s*=\s*'[^']*\bred\b[^']*'[^>]*>)");
+                            static const std::regex class_red(
+                                R"((<\s*span\s+class\s*=\s*'[^']*)\bred\b([^']*'[^>]*>))"
+                            );
                             if (bracket_check==false)
                             {
-                                static const std::string class_cyan = "<span class='cyan'";
-                                code_row = std::regex_replace(code_row, class_red, class_cyan);
+                                if (annotated_code)
+                                {
+                                    static const std::regex ccov_only(
+                                        R"(//\s*ccov:\s*A(?:\d|E)(?:\s*&lt;.*?&gt;)?\s*(?=(?:<span[^>]*>\s*</span>\s*)*</pre>\s*</td>\s*$))"
+                                    );
+
+                                    static const std::regex ccov_suffix(
+                                        R"(\s+ccov:\s*A(?:\d|E)(?:\s*&lt;.*?&gt;)?\s*(?=(?:<span[^>]*>\s*</span>\s*)*</pre>\s*</td>\s*$))"
+                                    );
+
+                                    code_row = std::regex_replace(code_row, ccov_only, "");
+                                    code_row = std::regex_replace(code_row, ccov_suffix, "");
+                                }
+                                static const std::string class_cyan = "$1cyan$2";
+                                if (std::regex_search(code_row, class_red))
+                                {
+                                    code_row = std::regex_replace(code_row, class_red, class_cyan);
+                                }
                             }
                             else
                             {
@@ -1688,6 +1717,13 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                         annotation.clear();
                         annotation_string.clear();
                     }
+
+                    if (skip_line)
+                    {
+                        annotation.clear();
+                        annotation_string.clear();
+                    }
+
                     ++row_count;
                     line_hit = false;
                     count_hit = false;
