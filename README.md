@@ -50,6 +50,7 @@ llvm-cov show ".\P300_SignalProcessing.exe"
     "OtherFile.cpp"
 
 e.g.
+
 llvm-cov show ".\P300_SignalProcessing.exe"
     -instr-profile=".\coverage.profdata"
     -format=html
@@ -57,3 +58,10 @@ llvm-cov show ".\P300_SignalProcessing.exe"
     "carray.h"
     "dsparray.h"
     "ProcessData.cpp"
+
+
+llvm-cov show ".\x64\Unit Test - Release\P300_SignalProcessing.exe" -instr-profile=".\coverage.profdata" -format=html -output-dir="coverage_report" "carray.h" "dsparray.h" "ProcessData.cpp"
+
+### Forth step
+Copy the resulting files into the CCAnnotator folder and specify the index.html file (or the ccannotator.exe in the root folder).
+e.g. ccannotator.exe --index_file=index.html --index_folder=./code_coverage_report --source_folder=./code_coverage_report --patch_source_file=false
