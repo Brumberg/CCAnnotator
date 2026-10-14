@@ -2502,7 +2502,9 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
                             bool sub_attributes = std::regex_search(attrib, match_subattributes, subattribute);
                             if (sub_attributes)
                             {
-                                static const std::regex attrib_pattern(R"(([^\s]+)\s*=\s*([^\s]+))");
+                                static const std::regex attrib_pattern(
+                                    R"(([^\s=]+)\s*=\s*(['"])(.*?)\2)"
+                                );
                                 if (sub_attributes == true)
                                 {
                                     std::string content = match_subattributes[2].str();
@@ -2511,7 +2513,7 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
 
                                     std::string::const_iterator searchStart = attribute.cbegin();
                                     while (std::regex_search(searchStart, attribute.cend(), attr_match, attrib_pattern)) {
-                                        attributes[attr_match[1].str()] = attr_match[2].str();
+                                        attributes[attr_match[1].str()] = attr_match[3].str();
                                         searchStart = attr_match.suffix().first;
                                     }
                                 }
