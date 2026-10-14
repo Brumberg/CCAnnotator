@@ -77,6 +77,7 @@ llvm-cov report `
     ".\x64\Unit Test - Release\P300_SignalProcessing.exe" `
     -instr-profile=".\coverage.profdata"
 ```
+(add the path to the environment if llvm-cov ca not be found)
 
 The report contains information such as:
 
