@@ -77,10 +77,13 @@ llvm-cov report `
     ".\x64\Unit Test - Release\P300_SignalProcessing.exe" `
     -instr-profile=".\coverage.profdata"
 ```
-#### Additional hint:
-Add the path to the environment if llvm-cov ca not be found, e.g.:
 
-```$env:Path += ";C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Tools\Llvm\x64\bin"```
+> **Hint:**  
+> If `llvm-cov` cannot be found, add the LLVM `bin` directory to your `PATH`:
+>
+> ```powershell
+> $env:Path += ";C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Tools\Llvm\x64\bin"
+> ```
 
 The report contains information such as:
 
