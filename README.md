@@ -148,7 +148,7 @@ llvm-cov show `
     -format=html `
     -output-dir="coverage_report" `
     "carray.h" `
-    "DSParray.h" `
+    "DSPArray.h" `
     "FFT.h" `
     "mathematics.h" `
     "ProcessData.cpp"
