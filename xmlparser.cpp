@@ -2057,8 +2057,8 @@ static bool load_html_code(const std::string& root, std::vector<ST_TextAttribute
             if (retVal)
             {
                 std::string file_id = i.references["src_file"];
-                source_tree[file_id].html = content;
-                retVal &= create_DOM_tree(content, &source_tree[file_id].ptree);
+                source_tree[file_id].html = std::move(content);
+                retVal &= create_DOM_tree(source_tree[file_id].html, &source_tree[file_id].ptree);
             }
         }
     }
