@@ -163,7 +163,44 @@ Then run `ccannotator.exe` and specify the generated `index.html` file and cover
 ```powershell
 ccannotator.exe `
     --index_file=index.html `
-    --index_folder=./code_coverage_report `
-    --source_folder=./code_coverage_report `
-    --patch_source_file=false
+
+### Step 5: Identify/demangle template instantiations
+
+Template instantiations in the coverage report appear as MSVC-mangled symbol names. The `undname` utility can be used to convert these symbols back into readable C++ declarations.
+
+For example, given the following symbol from the HTML coverage report:
+
+```text
+??$append@F$0DC@@?$CArray@F$0BO@@@QEAA?AViterator@0@AEAV?$CArray@F$0DC@@@@Z
 ```
+
+Run:
+
+```powershell
+undname '??$append@F$0DC@@?$CArray@F$0BO@@@QEAA?AViterator@0@AEAV?$CArray@F$0DC@@@@Z'
+```
+
+This returns:
+
+```text
+Microsoft (R) C++ Name Undecorator
+Copyright (C) Microsoft Corporation. All rights reserved.
+
+Undecoration of :-
+"??$append@F$0DC@@?$CArray@F$0BO@@@QEAA?AViterator@0@AEAV?$CArray@F$0DC@@@@Z"
+
+is :-
+"public: class CArray<short,30>::iterator __cdecl CArray<short,30>::append<short,50>(class CArray<short,50> & __ptr64) __ptr64"
+```
+
+The demangled name shows that the uncovered template instantiation corresponds to:
+
+```cpp
+CArray<short, 30>::append<short, 50>(
+    CArray<short, 50>&
+);
+```
+
+This makes it possible to construct a unit test that exercises the exact template instantiation reported as uncovered.
+
+> **PowerShell note:** Use single quotes (`'...'`) around the mangled name. With double quotes (`"..."`), PowerShell interprets `$...` sequences as variables and corrupts the mangled symbol.
