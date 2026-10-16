@@ -25,6 +25,7 @@ int main(int ac, char** av) {
             ("patch_source_file", po::value<std::string>()->default_value("false"), "specifies the sourcefile to update")
             ("annotate_html", po::value<std::string>()->default_value("true"), "annotate the html file")
             ("annotated_html_folder", po::value<std::string>()->default_value("./code_coverage_report"), "specifies a relative path to the annotated files")
+            ("sourcefile_ext", po::value<std::string>()->default_value(""), "specifies an extension to append to the source file")
             ("cc_ignore", po::value<std::string>()->default_value("LLVM_COV_EXCLUDE_LINE"), "specifies the default flag to ignore the line");
 
         po::variables_map vm;
@@ -54,6 +55,7 @@ int main(int ac, char** av) {
             parameters["annotate_html"] = vm["annotate_html"].as<std::string>();
             parameters["cc_ignore"] = vm["cc_ignore"].as<std::string>();
             parameters["annotated_html_folder"] = vm["annotated_html_folder"].as<std::string>();
+            parameters["sourcefile_ext"] = vm["sourcefile_ext"].as<std::string>();
             const std::string source = vm["index_file"].as<std::string>();
             retVal = build_node_tree(source, parameters);
 
