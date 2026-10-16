@@ -165,7 +165,6 @@ ccannotator.exe `
     --index_file=index.html `
 
 
-
 ### Step 5: Identify/demangle template instantiations
 
 Template instantiations in the coverage report appear as MSVC-mangled symbol names. The `undname` utility can be used to convert these symbols back into readable C++ declarations.
