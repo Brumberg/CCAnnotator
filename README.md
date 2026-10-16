@@ -162,8 +162,8 @@ Then run `ccannotator.exe` and specify the generated `index.html` file and cover
 
 ```powershell
 ccannotator.exe `
-    --index_file=index.html ```
-
+    --index_file=index.html `
+```
 
 ### Step 5: Identify/demangle template instantiations
 
