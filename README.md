@@ -162,7 +162,7 @@ Then run `ccannotator.exe` and specify the generated `index.html` file and cover
 
 ```powershell
 ccannotator.exe `
-    --index_file=index.html `
+    --index_file=index.html ```
 
 
 ### Step 5: Identify/demangle template instantiations
@@ -204,4 +204,5 @@ CArray<short, 30>::append<short, 50>(
 
 This makes it possible to construct a unit test that exercises the exact template instantiation reported as uncovered.
 
+> **PowerShell note:** Use single quotes (`'...'`) around the mangled name. With double quotes (`"..."`), PowerShell interprets `$...` sequences as variables and corrupts the mangled symbol.
 > **PowerShell note:** Use single quotes (`'...'`) around the mangled name. With double quotes (`"..."`), PowerShell interprets `$...` sequences as variables and corrupts the mangled symbol.
