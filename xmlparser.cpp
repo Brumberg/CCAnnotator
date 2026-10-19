@@ -799,16 +799,16 @@ static bool build_full_dom_tree(ST_HTMLContent& parser, ST_TABLE_ELEMENT*& ptabl
             std::string::const_iterator searchStart = attribute.cbegin();
             while (std::regex_search(searchStart, attribute.cend(), attr_match, attrib_pattern)) {
                 std::smatch enclosure_match;
-                static const std::regex enclosure_removal(R"(^[\'|\"](.*)[\'|\"]$)");
+                static const std::regex enclosure_removal(R"((^[\'\"])(.*)\1$)");
                 std::string enclosed_attribute = attr_match[1].str();
-                std::string enclosed_attribute_value = attr_match[2].str();
+                std::string enclosed_attribute_value = attr_match[3].str();
                 if (std::regex_search(enclosed_attribute, enclosure_match, enclosure_removal))
                 {
-                    enclosed_attribute = enclosure_match[1].str();
+                    enclosed_attribute = enclosure_match[2].str();
                 }
                 if (std::regex_search(enclosed_attribute_value, enclosure_match, enclosure_removal))
                 {
-                    enclosed_attribute_value = enclosure_match[1].str();
+                    enclosed_attribute_value = enclosure_match[2].str();
                 }
 
 
@@ -2228,7 +2228,6 @@ static bool save_and_annotate_source_code(std::unordered_map<std::string, std::s
                 std::vector<ST_TABLE_ELEMENT*> uncovered_branch;
                 findallattributes("class", "line-number", ptable, line_numbers);
                 findallattributes("class", "covered-line", ptable, covered_code);
-                findallattributes("class", "uncovered-line", ptable, uncovered_code);
                 findallattributes("class", "uncovered-line", ptable, uncovered_code);
                 //findallattributes("class", "red", ptable, uncovered_branch);
                 findallattributes("class", "code", ptable, code);
