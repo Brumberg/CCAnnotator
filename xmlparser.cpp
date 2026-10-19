@@ -686,7 +686,7 @@ static bool build_full_dom_tree(ST_HTMLContent& parser, ST_TABLE_ELEMENT*& ptabl
     {
         static const std::regex heading_content = std::regex(R"(<\s*h\d{1}\s*>(.*?)<\s*/h\d{1}\s*>)");
         static const std::regex table_column_content = std::regex(R"(<\s*td[^>]*>(.*?)<\s*/td\s*>)");
-        static const std::regex table_column_attributes = std::regex(R"(<\s*td\s+([^>]+).*<\s*/td\s*>)");
+        static const std::regex table_column_attributes = std::regex(R"(<\s*td\s+([^>]+)>[\s\S]*?<\s*/td\s*>)");
         static const std::regex table_row_attributes = std::regex(R"(<\s*tr\s+([^>]+)>.*<\s*/tr\s*>)");
 
         static const HTML_RegExBaseExpressions ExpressionList[] =
