@@ -2204,8 +2204,8 @@ static bool save_and_annotate_source_code(std::unordered_map<std::string, std::s
 {
     bool retVal = true;
     const std::string exclude_line_from_code_coverage = parameter["cc_ignore"];
-    const bool save_code_as_different_file = parameter["create_new_sourcefiles"] == "true";
-    const std::string src_extension = parameter["sourcefile_modifier"];
+    const bool save_code_as_different_file = parameter["sourcefile_ext"].size() != 0u;
+    const std::string src_extension = parameter["sourcefile_ext"];
     const std::string uncovered_line_exception = parameter["uncovered_line"];
     const std::string uncovered_branch_exception = parameter["uncovered_branch"];
 
