@@ -2311,7 +2311,7 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
         if (iterator != i.references.cend())
         {
             std::smatch match;
-            std::regex quotationmarks_removal(R"(^[\'|\"](.*)[\'|\"]$)");
+            std::regex quotationmarks_removal(R"(^[\'\"](.*)[\'\"]$)");
 
 
             std::string abs_file_path = iterator->second;
