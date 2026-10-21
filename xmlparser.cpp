@@ -11,6 +11,7 @@
 #include <queue>
 #include <array>
 #include <stack>
+#include <span>
 #include <unordered_map>
 #include <cassert>
 #include "VersionInfo.h"
@@ -2118,11 +2119,170 @@ static bool save_file(std::string file_name, std::vector<std::string> lines)
     return retVal;
 }
 
+/*------------------------------------------------------------------------------------------*//**
+\brief          dive into the project folder and retreive all files with the given file endings
+\
+\param[in]      root folder of the project (typically where the vcxproj is located),
+\param[in]      file endings
+\param[out]     list of all files with the given file endings
+\return         true/false
+*//*-------------------------------------------------------------------------------------------*/
+bool retrieve_list_of_project_files(const std::filesystem::path& root_folder, std::span<const std::string_view> const extensions, std::span<const std::string_view> const exclusions, std::vector<std::filesystem::path>& file_list)
+{
+	bool retVal = true;
+    std::error_code ec;
+	try {
+        std::filesystem::directory_iterator iterator{ root_folder, std::filesystem::directory_options::skip_permission_denied, ec };
+        std::filesystem::directory_iterator end{};
+		
+		while(iterator != end) 
+        {
+			if (iterator->is_regular_file()) {
+                std::filesystem::path file_extension = iterator->path().extension();
+                //std::cout << "Filename " << iterator->path() << std::endl;
+                for (const auto& ext : extensions)
+                {
+                    if (file_extension == ext)
+                    {
+                        file_list.push_back(iterator->path().lexically_normal());
+                        break;
+                    }
+				}
+			}
+            else
+            {
+                if (iterator->is_directory())
+                {
+                    bool exclude = false;
+                    const auto path = iterator->path().filename();
+                    for (const auto& ex : exclusions)
+                    {
+                        if (ex == path)
+                        {
+                            exclude = true;
+                            break;
+                        }
+                    }
+                    if (exclude == false)
+                    {
+                        retVal = retrieve_list_of_project_files(iterator->path(), extensions, exclusions, file_list) && retVal;
+                    }
+                }
+            }
+            ec.clear();
+            iterator.increment(ec);
+		}
+	}
+
+	catch (const std::filesystem::filesystem_error& e) {
+        retVal = false;
+		std::cerr << "Error: " << e.what() << std::endl;
+	}
+	return retVal;
+}
+
+/*------------------------------------------------------------------------------------------*//**
+\brief          Find the best matching source file for a given file reference.
+\
+\param[in]      reference   File reference to match.
+\param[in]      list        List of possible source files.
+\param[out]     match       Best matching source file, if at least one candidate is found.
+\return         EN_exact if the source file can be uniquely identified,
+                EN_ambiguous if a fallback candidate is returned,
+                EN_not_found if no candidate is found.
+*//*-------------------------------------------------------------------------------------------*/
+
+enum class EN_SourceFileMatch
+{
+    EN_not_found,  // No candidate with matching html_ref_filename
+    EN_ambiguous,  // Best candidate returned, but not uniquely resolved
+    EN_exact       // Candidate uniquely resolved
+};
+
+EN_SourceFileMatch get_source_file(std::filesystem::path const& reference, std::vector<std::filesystem::path> const& list, std::filesystem::path& match)
+{
+    EN_SourceFileMatch retVal;
+	match.clear();
+	const auto file_name_to_match = reference.filename();
+	std::vector<std::pair<std::filesystem::path, std::filesystem::path>> condensed_list;
+	for (const auto &i : list)
+	{
+		const std::filesystem::path normalized_path = i.lexically_normal();
+		if (normalized_path.filename() == file_name_to_match)
+			condensed_list.emplace_back(normalized_path, normalized_path);
+	}
+	if (condensed_list.empty())
+	{
+		retVal = EN_SourceFileMatch::EN_not_found;
+	}
+	else
+	{
+		if (condensed_list.size() > 1u)
+		{
+			std::filesystem::path ref_counter = reference.lexically_normal();
+            std::filesystem::path previous_ref_counter = ref_counter;
+			bool break_loop = false;
+			do
+			{
+				match = condensed_list.front().first;
+				for (auto it = condensed_list.cbegin(); it != condensed_list.cend(); )
+				{
+					if (it->second.filename() != ref_counter.filename())
+					{
+						it = condensed_list.erase(it);
+					}
+					else
+					{
+						++it;
+					}
+				}
+				if (condensed_list.size() > 1u)
+				{
+					for (auto& i : condensed_list)
+					{
+						i.second = i.second.parent_path();
+					}
+					ref_counter = ref_counter.parent_path();
+				}
+				else
+				{
+					break_loop = true;
+				}
+				break_loop = break_loop || (previous_ref_counter == ref_counter);
+                previous_ref_counter = ref_counter;
+			} while (!break_loop);
+            
+            if (!condensed_list.empty())
+            {
+                match = condensed_list.front().first;
+                retVal = condensed_list.size() > 1u
+                    ? EN_SourceFileMatch::EN_ambiguous
+                    : EN_SourceFileMatch::EN_exact;
+            }
+            else
+            {
+				retVal = EN_SourceFileMatch::EN_ambiguous;
+            }
+		}
+        else
+        {
+            match = condensed_list.front().first;
+            retVal = EN_SourceFileMatch::EN_exact;
+        }
+	}
+	return retVal;
+}
+
 static bool save_and_annotate_source_code(ST_Command_Line_Options const& parameter, std::unordered_map<std::string, std::vector<std::string>>& source, std::unordered_map<std::string, ST_HTMLContent>& tree)
 {
 	bool retVal = true;
 	const bool save_code_as_different_file = parameter.sourcefile_ext.size() != 0u;
 	const std::string& src_extension = parameter.sourcefile_ext;
+
+    std::vector<std::filesystem::path> file_list;
+	constexpr std::string_view extensions[] = { ".cpp", ".c", ".h", ".hpp" };
+    constexpr std::string_view exclusions[] = { ".github", ".visuallint", ".vs", "gmock", "gtest", "gnuplot-iostream" };
+    retVal = retrieve_list_of_project_files(parameter.project_folder, extensions, exclusions, file_list);
 
 	for (auto& tree_pos : tree)
 	{
@@ -2222,18 +2382,37 @@ static bool save_and_annotate_source_code(ST_Command_Line_Options const& paramet
 								}
 							};
 
-						const std::string filename = cpp_filename(tree_pos.first);
-						if (*output.begin() == 0u)
-						{
-							std::cout << "Line/parsing error occured." << "Filename: " << std::endl;
-							for (auto uncovered_lines = output.cbegin() + 1u; uncovered_lines != output.cend(); ++uncovered_lines)
+						const std::string html_ref_filename = cpp_filename(tree_pos.first);
+						std::filesystem::path related_project_file;
+						const auto file_match_found = get_source_file(html_ref_filename, file_list, related_project_file);
+						const auto assign_file_name = [](EN_SourceFileMatch match, const std::string& html_reference, const std::filesystem::path& file_path) -> std::string
 							{
-								std::cout
-									<< filename << "(" << *uncovered_lines << ") : "
-									<< "warning CCOV002: uncovered line; "
-									<< "annotation candidate: // ccov: Ax" << std::endl;
-							}
-						}
+								switch (match)
+								{
+								case EN_SourceFileMatch::EN_exact:
+                                case EN_SourceFileMatch::EN_ambiguous:
+									return file_path.generic_string();
+								case EN_SourceFileMatch::EN_not_found:
+								default:
+									return html_reference;
+								}
+							};
+                        const auto filename = assign_file_name(file_match_found, html_ref_filename, related_project_file);
+                        if (output.front() == 0u)
+                        {
+                            std::cout << "Line/parsing error occurred. Affected source locations:" << std::endl;
+
+                            for (auto uncovered_lines = output.cbegin() + 1u;
+                                uncovered_lines != output.cend();
+                                ++uncovered_lines)
+                            {
+                                std::cout
+                                    << "\t" << filename << "(" << *uncovered_lines << ") : "
+                                    << "warning CCOV002: uncovered line; "
+                                    << "annotation candidate: // ccov: Ax"
+                                    << std::endl;
+                            }
+                        }
 						else
 						{
 							for (const auto uncovered_lines : output)
@@ -2292,7 +2471,6 @@ static bool save_and_annotate_html_files(std::filesystem::path const &root, ST_C
         {
             std::smatch match;
             std::regex quotationmarks_removal(R"(^[\'\"](.*)[\'\"]$)");
-
 
             std::string abs_file_path = iterator->second;
             bool adapted_content = std::regex_search(abs_file_path, match, quotationmarks_removal);
