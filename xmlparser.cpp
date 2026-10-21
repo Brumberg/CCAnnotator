@@ -1,8 +1,7 @@
 #include "xmlparser.h"
 #include "gumbo.h"
-
 #include <unordered_set>
-#include <filesystem>
+#include <algorithm>
 #include <iostream>
 #include <sstream>
 #include <fstream>
@@ -952,7 +951,7 @@ static bool build_full_dom_tree(ST_HTMLContent& parser, ST_TABLE_ELEMENT*& ptabl
 \param[out]     void
 \return         -
 *//*-------------------------------------------------------------------------------------------*/
-static bool open_html_file(std::string source, std::string& content)
+static bool open_html_file(std::filesystem::path const& source, std::string& content)
 {
     bool retVal = false;
 
@@ -1824,7 +1823,7 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
     return true;
 }
 
-static bool write_html_file(const std::string& file_name, const std::string& content)
+static bool write_html_file(std::filesystem::path const& file_name, const std::string& content)
 {
     bool retVal = true;
     std::ofstream out(file_name);
@@ -1855,28 +1854,17 @@ static bool write_html_file(const std::string& file_name, const std::string& con
 \param[out]     void
 \return         -
 *//*-------------------------------------------------------------------------------------------*/
-static bool build_relative_paths(const std::string& root, std::vector<ST_TextAttributes>& attributes)
+static bool build_relative_paths(const std::filesystem::path& root, std::vector<ST_TextAttributes>& attributes)
 {
     //const std::filesystem::path path = std::filesystem::current_path();
     //const std::string rel_path = path.string();
-    const std::string& rel_path = root;
+    const std::filesystem::path& rel_path = root;
     for (auto& i : attributes)
     {
         if (i.references.find("href") != i.references.cend())
         {
-            /*std::string dummy = i.references["href"];
-            size_t ix = dummy.find(rel_path);
-            if (ix != std::string::npos)
-            {
-                static const std::string ending = ".html";
-                size_t ending_ = dummy.find(ending);
-                ending_ = ending_ == std::string::npos ? dummy.size() : ending_;
-                dummy = dummy.substr(ix, ending_ - ix);
-                i.references["rel_file_path"] = dummy;
-                i.crlf = false;
-            }*/
-            std::cout << rel_path << i.references["href"] << std::endl;
-            const std::filesystem::path path = std::filesystem::path(rel_path+i.references["href"]).lexically_normal();
+            const std::filesystem::path path = std::filesystem::path(rel_path / i.references["href"]).lexically_normal();
+            std::cout << path << std::endl;
             if (std::filesystem::is_regular_file(path))
             {
                 i.references["rel_file_path"] = path.generic_string();
@@ -1904,7 +1892,7 @@ static bool build_relative_paths(const std::string& root, std::vector<ST_TextAtt
 \param[out]     void
 \return         -
 *//*-------------------------------------------------------------------------------------------*/
-static bool dive_into_folder(const std::string& root_folder, std::vector<ST_TextAttributes>& attributes)
+static bool dive_into_folder(const std::filesystem::path& root_folder, std::vector<ST_TextAttributes>& attributes)
 {
     bool retVal = false;
     
@@ -1930,8 +1918,8 @@ static bool dive_into_folder(const std::string& root_folder, std::vector<ST_Text
                         const std::string file_ref = std::filesystem::path(entry.path()).generic_string();
                         if (file_ref.find(html_ref) != std::string::npos)
                         {
-                            std::cout << "Found: " << entry.path().string() << std::endl;
-                            i.references["src_file"] = entry.path().string();
+                            std::cout << "Found: " << file_ref << std::endl;
+                            i.references["src_file"] = file_ref;
                         }
                     }
                 }
@@ -2034,7 +2022,7 @@ static bool load_source_code(std::vector<ST_TextAttributes>& attributes, std::un
 \param[out]     void
 \return         -
 *//*-------------------------------------------------------------------------------------------*/
-static bool load_html_code(const std::string& root, std::vector<ST_TextAttributes>& attributes, std::unordered_map<std::string, ST_HTMLContent>& source_tree)
+static bool load_html_code(const std::filesystem::path& root, std::vector<ST_TextAttributes>& attributes, std::unordered_map<std::string, ST_HTMLContent>& source_tree)
 {
     bool retVal = true;
     source_tree.clear();
@@ -2050,7 +2038,7 @@ static bool load_html_code(const std::string& root, std::vector<ST_TextAttribute
             {
                 abs_file_path = match[1].str();
             }
-            const std::string root_file = root + abs_file_path;
+            const std::filesystem::path root_file = (root / abs_file_path).lexically_normal();
             std::cout << "\033[1;32mProcessing: \033[0m" << root_file << std::endl;
             std::string content;
             retVal &= open_html_file(root_file, content);
@@ -2063,76 +2051,6 @@ static bool load_html_code(const std::string& root, std::vector<ST_TextAttribute
         }
     }
 
-    return retVal;
-}
-
-
-static bool extract_metric(std::unordered_map<std::string, std::string> parameter, std::string exception_comment, std::unordered_set<std::string>& code_metric, std::vector<std::string>& code_container)
-{
-    bool retVal = true;
-    const std::string exclude_line_from_code_coverage = parameter["cc_ignore"];
-
-    for (auto& j : code_metric)
-    {
-        size_t line_no;
-        try {
-            std::stringstream a(j.c_str());
-            a >> line_no;
-            if (line_no > 0)
-            {
-                --line_no;
-            }
-            else
-            {
-                std::ios_base::failure e("Number of lines have to be larger 0.");
-                throw e;
-            }
-        }
-        catch (std::ios_base::failure& e)
-        {
-            std::cerr << e.what() << std::endl;
-            retVal = false;
-            break;
-        }
-
-        if (line_no < code_container.size())
-        {
-            std::string& code = code_container[line_no];
-            struct EN_SupportedComments {
-                std::string comment;
-            };
-
-            static const EN_SupportedComments comments[] =
-            {
-                "/*",
-                "//"
-            };
-
-            bool comment_found = false;
-            for (auto& comment_type : comments)
-            {
-                const size_t comment = code.find(comment_type.comment);
-                if (comment != std::string::npos)
-                {
-                    comment_found = true;
-                    if (code.find(exception_comment) == std::string::npos)
-                    {
-                        code.insert(comment + comment_type.comment.size(), "\t" + exclude_line_from_code_coverage + "\t" + exception_comment + "\t");
-                    }
-                    break;
-                }
-            }
-            if (comment_found == false)
-            {
-                code += "\t//" + exclude_line_from_code_coverage + "\t" + exception_comment;
-            }
-        }
-        else
-        {
-            std::cerr << "Invalid relation between html and source file" << std::endl;
-            retVal = false;
-        }
-    }
     return retVal;
 }
 
@@ -2161,7 +2079,7 @@ static std::unordered_set<std::string> unite(std::unordered_set<std::string>& fi
 }
 
 
-static bool save_file(std::string file_name, std::string& content)
+static bool save_file(std::filesystem::path const& file_name, std::string& content)
 {
     bool retVal = false;
     std::ofstream file(file_name);
@@ -2200,80 +2118,143 @@ static bool save_file(std::string file_name, std::vector<std::string> lines)
     return retVal;
 }
 
-static bool save_and_annotate_source_code(std::unordered_map<std::string, std::string> parameter, std::unordered_map<std::string, std::vector<std::string>>& source, std::unordered_map<std::string, ST_HTMLContent>& tree)
+static bool save_and_annotate_source_code(ST_Command_Line_Options const& parameter, std::unordered_map<std::string, std::vector<std::string>>& source, std::unordered_map<std::string, ST_HTMLContent>& tree)
 {
-    bool retVal = true;
-    const std::string exclude_line_from_code_coverage = parameter["cc_ignore"];
-    const bool save_code_as_different_file = parameter["sourcefile_ext"].size() != 0u;
-    const std::string src_extension = parameter["sourcefile_ext"];
-    const std::string uncovered_line_exception = parameter["uncovered_line"];
-    const std::string uncovered_branch_exception = parameter["uncovered_branch"];
+	bool retVal = true;
+	const bool save_code_as_different_file = parameter.sourcefile_ext.size() != 0u;
+	const std::string& src_extension = parameter.sourcefile_ext;
 
-    for (auto& i : tree)
-    {
-        ST_TABLE_ELEMENT* ptable;
-        std::vector<ST_TextAttributes> attrib;
-        retVal &= build_full_dom_tree(tree[i.first], ptable, attrib);
-        //show_all_nodes(0, ptable);
-        if (retVal == true)
-        {
-            ST_TABLE_ELEMENT* table_node = findtag(HTML_TAG::EN_TABLE, ptable);
-            if (table_node)
-            {
-                std::vector<ST_TABLE_ELEMENT*> line_numbers;
-                std::vector<ST_TABLE_ELEMENT*> uncovered_code;
-                std::vector<ST_TABLE_ELEMENT*> covered_code;
-                std::vector<ST_TABLE_ELEMENT*> count;
-                std::vector<ST_TABLE_ELEMENT*> code;
-                std::vector<ST_TABLE_ELEMENT*> uncovered_branch;
-                findallattributes("class", "line-number", ptable, line_numbers);
-                findallattributes("class", "covered-line", ptable, covered_code);
-                findallattributes("class", "uncovered-line", ptable, uncovered_code);
-                //findallattributes("class", "red", ptable, uncovered_branch);
-                findallattributes("class", "code", ptable, code);
+	for (auto& tree_pos : tree)
+	{
+		ST_TABLE_ELEMENT* ptable;
+		std::vector<ST_TextAttributes> attrib;
+		retVal &= build_full_dom_tree(tree[tree_pos.first], ptable, attrib);
+		//show_all_nodes(0, ptable);
+		if (retVal == true)
+		{
+			ST_TABLE_ELEMENT* table_node = findtag(HTML_TAG::EN_TABLE, ptable);
+			if (table_node)
+			{
+				std::vector<ST_TABLE_ELEMENT*> line_numbers;
+				std::vector<ST_TABLE_ELEMENT*> uncovered_code;
+				std::vector<ST_TABLE_ELEMENT*> covered_code;
+				std::vector<ST_TABLE_ELEMENT*> count;
+				std::vector<ST_TABLE_ELEMENT*> code;
+				std::vector<ST_TABLE_ELEMENT*> uncovered_branch;
+				findallattributes("class", "line-number", ptable, line_numbers);
+				findallattributes("class", "covered-line", ptable, covered_code);
+				findallattributes("class", "uncovered-line", ptable, uncovered_code);
+				//findallattributes("class", "red", ptable, uncovered_branch);
+				findallattributes("class", "code", ptable, code);
 
-                std::unordered_set<std::string> pure_uncovered_lines;
-                for (const auto& i : uncovered_code)
-                {
-                    //static const std::regex zeropattern = std::regex(R"0");
-                    //std::smatch is_zero;
-                    if (i->content == "0")
-                    {
-                        std::regex escaped_a_cpp_comment(".*?//.*?" + std::regex_replace(uncovered_line_exception, std::regex("([.^$|()\\[\\]{}*+?\\\\])"), "\\$1"));
-                        std::regex escaped_a_c_comment(".*?/\\*.*?" + std::regex_replace(uncovered_line_exception, std::regex("([.^$|()\\[\\]{}*+?\\\\])"), "\\$1") + "\\*/$");
-                        if (i->pNext)
-                        {
-                            //std::cout << "Potential line: " << i->pPrev->content << std::endl;
-                            std::string& code_content = i->pNext->content;
-                            if (!std::regex_match(code_content, escaped_a_cpp_comment) && !std::regex_match(code_content, escaped_a_c_comment))
-                            {
-                                //std::cout << "Uncovered line: " << i->pPrev->content << std::endl;
-                                pure_uncovered_lines.insert(i->pPrev->content);
-                            }
-                        }
-                    }
-                }
-                const auto src_iterator = source.find(i.first);
-                if (src_iterator != source.cend())
-                {
-                    retVal = extract_metric(parameter, parameter["uncovered_line"], pure_uncovered_lines, src_iterator->second);
-                    //retVal &= extract_metric(parameter, parameter["uncovered_branch"], pure_uncovered_branch, src.second);
-                    if (retVal==true)
-                    {
-                        std::string sourcfile_name = save_code_as_different_file == false ? src_iterator->first : src_iterator->first + src_extension;
-                        retVal &= save_file(sourcfile_name, src_iterator->second);
-                    }
-                }
-            }
-            if (retVal == false)
-                break;
-        }
-    }
+				std::unordered_set<std::string> pure_uncovered_lines;
+				for (const auto& i : uncovered_code)
+				{
+					//static const std::regex zeropattern = std::regex(R"0");
+					//std::smatch is_zero;
+					if (i->content == "0")
+					{
+						if (i->pNext)
+						{
+							const auto extract = [](std::string& content) -> std::string
+								{
+									static const std::regex extract(R"(\s*<\s*span\s+class\s*=\s*(['"])(.*?)\1\s*>(.*?)<\s*/span\s*>)");
+									std::smatch match;
+									bool found = std::regex_search(content, match, extract);
+									if (found)
+									{
+										return match[3].str();
+									}
+									return content;
+								};
 
-    return retVal;
+							std::string code_content = extract(i->pNext->content);
+							static const std::regex reject_as_uncovered(R"(^\s*(?:else\s*[{}]*\s*(?://.*)?|do\s*[{}]*\s*(?://.*)?|break\s*;\s*(?://.*)?|[{}]\s*(?://.*)?|.*//\s*ccov:\s*A[\dE].*)?$)");
+							if (!std::regex_match(code_content, reject_as_uncovered))
+							{
+								//std::cout << "Uncovered line: " << tree_pos->pPrev->content << std::endl;
+								pure_uncovered_lines.insert(i->pPrev->content);
+							}
+						}
+					}
+				}
+				const auto src_iterator = source.find(tree_pos.first);
+				if (src_iterator != source.cend())
+				{
+					std::string sourcfile_name = save_code_as_different_file == false ? src_iterator->first : src_iterator->first + src_extension;
+					//retVal &= save_file(sourcfile_name, src_iterator->second);
+					std::vector<size_t> output;
+					output.reserve(pure_uncovered_lines.size());
+					std::transform(pure_uncovered_lines.begin(), pure_uncovered_lines.end(), std::back_inserter(output), [](const std::string& s) -> size_t
+						{
+							size_t value{};
+							const auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), value);
+							if ((ec == std::errc{}) && (ptr == s.data() + s.size()))
+							{
+								return value;
+							}
+							else
+							{
+								return 0;
+							}
+						});
+
+					std::sort(output.begin(), output.end());
+					output.erase(
+						std::unique(output.begin(), output.end()),
+						output.end());
+
+					if (output.size() > 0)
+					{
+						const auto cpp_filename = [](const std::string& file_name) -> std::string
+							{
+								std::smatch match;
+								static const std::regex cpp_absolute_filepath_and_name(
+									R"((.*)\.html?$)"
+								);
+								if (std::regex_match(file_name, match, cpp_absolute_filepath_and_name))
+								{
+									return match[1].str();
+								}
+								else
+								{
+									return file_name;
+								}
+							};
+
+						const std::string filename = cpp_filename(tree_pos.first);
+						if (*output.begin() == 0u)
+						{
+							std::cout << "Line/parsing error occured." << "Filename: " << std::endl;
+							for (auto uncovered_lines = output.cbegin() + 1u; uncovered_lines != output.cend(); ++uncovered_lines)
+							{
+								std::cout
+									<< filename << "(" << *uncovered_lines << ") : "
+									<< "warning CCOV002: uncovered line; "
+									<< "annotation candidate: // ccov: Ax" << std::endl;
+							}
+						}
+						else
+						{
+							for (const auto uncovered_lines : output)
+							{
+								std::cout
+									<< filename << "(" << uncovered_lines << ") : "
+									<< "warning CCOV002: uncovered line; "
+									<< "annotation candidate: // ccov: Ax" << std::endl;
+							}
+						}
+					}
+				}
+			}
+			if (retVal == false)
+				break;
+		}
+	}
+	return retVal;
 }
 
-static bool patch_html_file(const std::string& content, const std::string& filename, ST_Statistics& stats)
+static bool patch_html_file(std::filesystem::path const& filename, const std::string& content, ST_Statistics& stats)
 {
     ST_DOMTREE* pDomTree = nullptr;
     std::string new_content;
@@ -2294,21 +2275,20 @@ static bool patch_html_file(const std::string& content, const std::string& filen
     return retVal;
 }
 
-static bool save_and_annotate_html_files(const std::string &root, std::unordered_map<std::string, std::string> parameter, ST_DocumentCollectionContent& source)
+static bool save_and_annotate_html_files(std::filesystem::path const &root, ST_Command_Line_Options const& parameter, ST_DocumentCollectionContent& source)
 {
     bool retVal = true;
-    const std::string exclude_line_from_code_coverage = parameter["cc_ignore"];
-    const bool save_code_as_different_file = parameter["create_new_sourcefiles"] == "true";
-    const std::string src_extension = parameter["sourcefile_modifier"];
-    const std::string annotated_index_file = parameter["annotated_index_file"];
-    const std::string annotated_html_folder = parameter["annotated_html_folder"];
+    const bool save_code_as_different_file = parameter.sourcefile_ext.size() > 0u;
+    const std::string src_extension = parameter.sourcefile_ext;
+    const std::string annotated_index_file = parameter.annotated_index_file.string();
+    const std::string annotated_html_folder = parameter.annotated_html_folder.string();
     size_t file_no = 0;
     //unordered_map<std::string, > statistics;
     std::unordered_map<std::string, ST_Statistics> statistics;
-    for (auto& i : source.attributes)
+    for (auto& tree_pos : source.attributes)
     {
-        const auto iterator = i.references.find("href");
-        if (iterator != i.references.cend())
+        const auto iterator = tree_pos.references.find("href");
+        if (iterator != tree_pos.references.cend())
         {
             std::smatch match;
             std::regex quotationmarks_removal(R"(^[\'\"](.*)[\'\"]$)");
@@ -2321,83 +2301,75 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
                 abs_file_path = match[1].str();
             }
 
-            std::string file_name = root + abs_file_path;
-            std::string content;
-
-            retVal = open_html_file(file_name, content);
-            if (retVal == true)
+            if (auto file_location = tree_pos.references.find("src_file"); file_location != tree_pos.references.cend())
             {
-                ST_Statistics stats;
-                //const auto filename_iterator = i.references.find("src_file");
-                
-                static const std::regex mod_string(R"((.+)\.html$)");
-                std::smatch match;
-                bool file_found = std::regex_search(file_name, match, mod_string);
-                if (file_found)
+                std::string content;
+
+                retVal = open_html_file(file_location->second, content);
+                if (retVal == true)
                 {
-                    std::string annotated_filename = match[1].str() + "_anno.html";
-                    std::string annotated_file_anchor = annotated_filename;
-                    i.references["annotated_src"] = annotated_filename;
-                    static const std::regex file_name_capture(R"(.*[\\/]([^\\/]+\.html$))");
-                    if (std::regex_search(annotated_filename, match, file_name_capture))
+                    if (auto html_file_reference = tree_pos.references.find("href"); html_file_reference != tree_pos.references.cend())
                     {
-                        file_name = match[1];
-                    }
-                    
-                    if (root.size() > 0)
-                    {
-                        size_t remove_root = annotated_filename.find(root);
-                        if (remove_root != std::string::npos)
+                        ST_Statistics stats;
+                        std::filesystem::path file_name = file_location->second;// std::filesystem::path(html_file_reference->second);
+                        //const auto filename_iterator = tree_pos.references.find("src_file");
+                        const std::string file_type = file_name.stem().extension().string();
+                        if (file_type == ".cpp" || file_type == ".h" || file_type == ".c")
                         {
-                            annotated_file_anchor = annotated_filename.substr(remove_root + root.length());
-                            const size_t pos1 = annotated_html_folder.find("./");
-                            const size_t pos2 = annotated_html_folder.find(".\\");
-                            std::string loc_annotated_html_folder;
-                            if (pos1 == 0 || pos2 == 0)
+                            const bool is_header = file_type == ".h";
+                            std::string annotated_filename;
+                            if (is_header)
                             {
-                                loc_annotated_html_folder = annotated_html_folder.substr(2);
+                                annotated_filename = file_name.stem().stem().string() + "_anno_h.html";
+                            }
+                            else if (file_type == ".cpp")
+                            {
+                                annotated_filename = file_name.stem().stem().string() + "_anno_cpp.html";
                             }
                             else
                             {
-                                loc_annotated_html_folder = annotated_html_folder;
+                                annotated_filename = file_name.stem().stem().string() + "_anno_c.html";
                             }
-                            //annotated_filename = loc_annotated_html_folder + annotated_filename;
-                            annotated_file_anchor = "./" + annotated_file_anchor;
+                            stats.file_name = annotated_filename;
+                            const std::filesystem::path href_file_path = html_file_reference->second;
+                            stats.file_anchor = (href_file_path.parent_path() / annotated_filename).lexically_normal().string();
                         }
                         else
                         {
-                            annotated_file_anchor = annotated_html_folder + annotated_filename;
-                            //annotated_filename = annotated_html_folder + annotated_filename;
-                            annotated_file_anchor = "./" + annotated_file_anchor;
+                            std::stringstream alternative_file_name;
+                            alternative_file_name << "undefined_anno_" << fileno << ".html";
+                            tree_pos.references["annotated_src"] = alternative_file_name.str();
+                            stats.file_name = alternative_file_name.str();
+                            const std::filesystem::path href_file_path = html_file_reference->second;
+                            stats.file_anchor = (href_file_path.parent_path() / file_name).lexically_normal().string();
+                        }
+
+                        const std::filesystem::path physical_file_location = file_location->second;
+                        retVal = patch_html_file((physical_file_location.parent_path() / file_name).lexically_normal(), content, stats);
+                        if (retVal == true)
+                        {
+                            statistics[tree_pos.references["href"]] = stats;
+                        }
+                        else
+                        {
+                            retVal = false;
+                            break;
                         }
                     }
-                    stats.file_name = annotated_filename;
-                    stats.file_anchor = annotated_file_anchor;
+                    else
+                    {
+                        retVal = false;
+                        break;
+                    }
                 }
                 else
                 {
-                    std::stringstream alternative_file_name;
-                    alternative_file_name << "undefined_anno_" << fileno << ".html";
-                    i.references["annotated_src"] = alternative_file_name.str();
-                    stats.file_name = alternative_file_name.str();
-                    stats.file_anchor = file_name;
-                }
-
-                retVal = patch_html_file(content, stats.file_name, stats);
-                if (retVal == true)
-                {
-                    statistics[i.references["href"]] = stats;
-                }
-                else
-                {
-                    retVal = false;
-                    break;
+                    std::cerr << "Unable to resolve href in html file: " << tree_pos.text << std::endl;
                 }
             }
             else
             {
-                retVal = false;
-                break;
+                std::cerr << "Unable to resolve source file: " << tree_pos.text << std::endl;
             }
         }
         file_no++;
@@ -2484,7 +2456,7 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
                     ST_DOMTREE* column_node = table_root_node->pChild;
                     if (column_node != nullptr)
                     {
-                        for (size_t i = 0; i < file_column_no; ++i)
+                        for (size_t tree_pos = 0; tree_pos < file_column_no; ++tree_pos)
                         {
                             if (column_node->pSiblings != nullptr)
                             {
@@ -2621,14 +2593,14 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
                     }
                    
                    
-                    std::string dest_file;
+                    std::filesystem::path dest_file;
                     if (annotated_index_file.size())
                     {
-                        dest_file = root + annotated_index_file;
+                        dest_file = root / annotated_index_file;
                     }
                     else
                     {
-                        dest_file = root + "annotated_index.html";
+                        dest_file = root / "annotated_index.html";
                     }
                     
                     retVal = save_file(dest_file, new_index_file);
@@ -2639,7 +2611,7 @@ static bool save_and_annotate_html_files(const std::string &root, std::unordered
     return retVal;
 }
 
-static bool load_index_file(std::string file_name, ST_HTMLContent& tree_content)
+static bool load_index_file(std::filesystem::path file_name, ST_HTMLContent& tree_content)
 {
     bool retVal = false;
 
@@ -2759,13 +2731,13 @@ static bool check_index_file(ST_HTMLContent& parser, ST_TABLE_ELEMENT *&ptable, 
                                         if (column != nullptr)
                                         {
                                             retVal = true;
-                                            for (const auto& i : IdentStrings)
+                                            for (const auto& tree_pos : IdentStrings)
                                             {
                                                 bool check = false;
                                                 ST_TABLE_ELEMENT* find_table_headers = column;
                                                 while (find_table_headers)
                                                 {
-                                                    if (i == find_table_headers->content)
+                                                    if (tree_pos == find_table_headers->content)
                                                     {
                                                         check = true;
                                                         break;
@@ -2804,64 +2776,62 @@ static bool check_index_file(ST_HTMLContent& parser, ST_TABLE_ELEMENT *&ptable, 
 \param[out]     void
 \return         -
 *//*-------------------------------------------------------------------------------------------*/
-bool build_node_tree(std::string source, std::unordered_map<std::string, std::string> parameter)
+bool build_node_tree(ST_Command_Line_Options const& parameter)
 {
-    std::string output;
-    bool retVal = false;
-    if (parameter.find("index_file") != parameter.cend() && parameter.find("index_folder") != parameter.cend() && parameter.find("source_folder") != parameter.cend())
-    {
-        ST_DocumentCollectionContent content;
-        std::unordered_map<std::string, std::vector<std::string>> source_code;
+	std::string output;
+	bool retVal = false;
 
-        const std::string root = parameter["index_folder"] + "/";
-        retVal = load_index_file(root + source, content.index_file);
-        if (retVal == true)
-        {
-            retVal = check_index_file(content.index_file, content.pIndexTableStruct, content.attributes);
-            if (retVal == true)
-            {
-                build_relative_paths(root, content.attributes);
-                retVal = content.attributes.size() > 0u;
-                if (retVal == true)
-                {
-                    retVal = dive_into_folder(parameter["source_folder"], content.attributes);
-                    if (retVal == true)
-                    {
-                        std::unordered_map<std::string, std::vector<std::string>> source_code;
-                        retVal = load_source_code(content.attributes, source_code);
-                        if (retVal == true)
-                        {
-                            std::unordered_map<std::string, ST_HTMLContent> source_tree;
-                            retVal = load_html_code(root, content.attributes, source_tree);
-                            if (retVal == true)
-                            {
-                                if (parameter["patch_source_file"] == "true")
-                                {
-                                    retVal = save_and_annotate_source_code(parameter, source_code, source_tree);
-                                    if (retVal == true)
-                                    {
-                                        std::cout << "Source files successfully annotated" << std::endl;
-                                    }
-                                }
+	ST_DocumentCollectionContent content;
+	std::unordered_map<std::string, std::vector<std::string>> source_code;
 
-                                if (parameter["annotate_html"] == "true")
-                                {
-                                    retVal = save_and_annotate_html_files(root, parameter, content);
-                                    if (retVal == true)
-                                    {
-                                        std::cout << "HTML files successfully annotated" << std::endl;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                else
-                {
-                    std::cerr << "Unable to annotate files. Files not found." << std::endl;
-                }
-            }
-        }
-    }
-    return retVal;
+	const std::filesystem::path root = parameter.index_folder;
+	retVal = load_index_file(root / parameter.index_file, content.index_file);
+	if (retVal == true)
+	{
+		retVal = check_index_file(content.index_file, content.pIndexTableStruct, content.attributes);
+		if (retVal == true)
+		{
+			build_relative_paths(root, content.attributes);
+			retVal = content.attributes.size() > 0u;
+			if (retVal == true)
+			{
+				retVal = dive_into_folder(parameter.index_folder.string(), content.attributes);
+				if (retVal == true)
+				{
+					std::unordered_map<std::string, std::vector<std::string>> source_code;
+					retVal = load_source_code(content.attributes, source_code);
+					if (retVal == true)
+					{
+						std::unordered_map<std::string, ST_HTMLContent> source_tree;
+						retVal = load_html_code(root, content.attributes, source_tree);
+						if (retVal == true)
+						{
+							if (parameter.diagnostics == true)
+							{
+								retVal = save_and_annotate_source_code(parameter, source_code, source_tree);
+								if (retVal == true)
+								{
+									std::cout << "Source files successfully annotated" << std::endl;
+								}
+							}
+
+							if (parameter.annotate_html == true)
+							{
+								retVal = save_and_annotate_html_files(root, parameter, content);
+								if (retVal == true)
+								{
+									std::cout << "HTML files successfully annotated" << std::endl;
+								}
+							}
+						}
+					}
+				}
+			}
+			else
+			{
+				std::cerr << "Unable to annotate files. Files not found." << std::endl;
+			}
+		}
+	}
+	return retVal;
 }
