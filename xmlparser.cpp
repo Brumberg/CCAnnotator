@@ -1888,7 +1888,7 @@ static bool build_relative_paths(const std::filesystem::path& root, std::vector<
         if (i.references.find("href") != i.references.cend())
         {
             const std::filesystem::path path = std::filesystem::path(rel_path / i.references["href"]).lexically_normal();
-            std::cout << path << std::endl;
+            //std::cout << path << std::endl;
             if (std::filesystem::is_regular_file(path))
             {
                 i.references["rel_file_path"] = path.generic_string();
@@ -1942,7 +1942,7 @@ static bool dive_into_folder(const std::filesystem::path& root_folder, std::vect
                         const std::string file_ref = std::filesystem::path(entry.path()).generic_string();
                         if (file_ref.find(html_ref) != std::string::npos)
                         {
-                            std::cout << "Found: " << file_ref << std::endl;
+                            //std::cout << "Files resolved: " << file_ref << std::endl;
                             i.references["src_file"] = file_ref;
                         }
                     }
