@@ -1293,36 +1293,36 @@ static bool create_DOM_tree(const std::string& content, ST_DOMTREE** ppDomTree)
     return retVal;
 }
 
+static bool check_if_bracket(std::string const& code)
+	{
+		static const std::regex remove_html_tags{ R"(<[^>]*>)" };
+		static const std::regex no_content(
+			R"(^\s*(?:[{}\s;]+|else(?!\s*if\b)|case\s+\w+\s*:|break\s*;|default\s*:|#(?:ifndef|ifdef|if|endif|else)\b.*|typedef\b.*)\s*(?://)?)"
+		);
+		static const std::regex drop_expansion_view{ R"((.*?)<\s*div\s*class\s*=\s*(['"])expansion-view\1[^>]*>)" };
+		std::string plainCode;
+		std::smatch expansion;
+		if (std::regex_search(code, expansion, drop_expansion_view))
+		{
+			plainCode = std::regex_replace(
+				expansion.prefix().str(),
+				remove_html_tags,
+				""
+			);
+		}
+		else
+		{
+			plainCode = std::regex_replace(
+				code,
+				remove_html_tags,
+				""
+			);
+		}
+		return std::regex_match(plainCode, no_content);
+	}
+
 static bool create_annotated_html(const std::string& content, std::string& new_content, ST_Statistics& stats, ST_DOMTREE* pDomTree)
 {
-	const auto check_if_bracket = [](std::string const& code) -> bool
-		{
-			static const std::regex remove_html_tags{ R"(<[^>]*>)" };
-			static const std::regex no_content(
-				R"(^\s*(?:[{}\s;]+|else(?!\s*if\b)|case\s+\w+\s*:|break\s*;|default\s*:|#(?:ifndef|ifdef|if|endif|else)\b.*|typedef\b.*)\s*(?://)?)"
-			);
-            static const std::regex drop_expansion_view{ R"((.*?)<\s*div\s*class\s*=\s*(['"])expansion-view\1[^>]*>)" };
-            std::string plainCode;
-            std::smatch expansion;
-            if (std::regex_search(code, expansion, drop_expansion_view))
-            {
-                plainCode = std::regex_replace(
-                    expansion.prefix().str(),
-                    remove_html_tags,
-                    ""
-                );
-            }
-            else
-            {
-                plainCode = std::regex_replace(
-                    code,
-                    remove_html_tags,
-                    ""
-                );
-            }
-			return std::regex_match(plainCode, no_content);
-		};
-
     ST_DOMTREE* tree = pDomTree;
     std::stack<ST_DOMTREE*> parent;
     std::stack<bool> table_match;
@@ -1359,7 +1359,7 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
     std::unordered_map<size_t, size_t> dict_remaining_uncovered_lines;
 
     //static const std::regex annotation_pattern(R"(//.*?&lt;cov\s+class=&apos;(A\d)&apos;&gt;(.*?)&lt;\s*/cov\s*&gt;)");
-    static const std::regex annotation_pattern(R"(//.*?ccov:\s+(A[\d{1}E])(?:\b.*&lt;\s*([^&]+)\s*&gt;)*)");
+    static const std::regex annotation_pattern(R"(//.*?ccov:\s+(A[\dE])\b)");
 
     while (tree != nullptr)
     {
@@ -2339,24 +2339,14 @@ static bool save_and_annotate_source_code(ST_Command_Line_Options const& paramet
 					{
 						if (i->pNext)
 						{
-							const auto extract = [](std::string& content) -> std::string
-								{
-									static const std::regex extract(R"(\s*<\s*span\s+class\s*=\s*(['"])(.*?)\1\s*>(.*?)<\s*/span\s*>)");
-									std::smatch match;
-									bool found = std::regex_search(content, match, extract);
-									if (found)
-									{
-										return match[3].str();
-									}
-									return content;
-								};
-
-							std::string code_content = extract(i->pNext->content);
-							static const std::regex reject_as_uncovered(R"(^\s*(?:else\s*[{}]*\s*(?://.*)?|do\s*[{}]*\s*(?://.*)?|break\s*;\s*(?://.*)?|[{}]\s*(?://.*)?|.*//\s*ccov:\s*A[\dE].*)?$)");
-							if (!std::regex_match(code_content, reject_as_uncovered))
+                            static const std::regex annotation_pattern(R"(//.*?ccov:\s+(A[\dE])\b)");
+							std::smatch match;
+							if (!std::regex_search(i->pNext->content, match, annotation_pattern))
 							{
-								//std::cout << "Uncovered line: " << tree_pos->pPrev->content << std::endl;
-								pure_uncovered_lines.insert(i->pPrev->content);
+								if (!check_if_bracket(i->pNext->content))
+								{
+                                    pure_uncovered_lines.insert(i->pPrev->content);
+								}
 							}
 						}
 					}
