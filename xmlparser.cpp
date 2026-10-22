@@ -1295,16 +1295,33 @@ static bool create_DOM_tree(const std::string& content, ST_DOMTREE** ppDomTree)
 
 static bool create_annotated_html(const std::string& content, std::string& new_content, ST_Statistics& stats, ST_DOMTREE* pDomTree)
 {
-    const auto check_if_bracket = [](std::string& code) -> bool
-    {
-        //static const std::regex no_content(R"(<\s*span\s*class\s*=\s*'red'[^>]*>\s*(?:\{|\}|else|case\s+\w+\s*:|break\s*;|break\s*<\s*/span\s*>\s*;|default\s*:){1}\s*(//)?|<\s*pre\s*>\s*else\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*#ifndef\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*#ifdef\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*#if\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*#endif\s*(//)?|<\s*pre\s*><span\s+class\s*=\s*'red'\s*>\s*typedef\s*(//)?)");//
-        static const std::regex no_content(
-            R"(<\s*span\s*class\s*=\s*'[^']*\bred\b[^']*'[^>]*>\s*(?:\{|\}|else|case\s+\w+\s*:|break\s*;|break\s*<\s*/span\s*>\s*;|default\s*:)\s*(?://)?|<\s*pre\s*>\s*else\s*(?://)?|<\s*pre\s*><span\s+class\s*=\s*'[^']*\bred\b[^']*'\s*>\s*#ifndef\s*(?://)?|<\s*pre\s*><span\s+class\s*=\s*'[^']*\bred\b[^']*'\s*>\s*#ifdef\s*(?://)?|<\s*pre\s*><span\s+class\s*=\s*'[^']*\bred\b[^']*'\s*>\s*#if\s*(?://)?|<\s*pre\s*><span\s+class\s*=\s*'[^']*\bred\b[^']*'\s*>\s*#endif\s*(?://)?|<\s*pre\s*><span\s+class\s*=\s*'[^']*\bred\b[^']*'\s*>\s*typedef\s*(?://)?)"
-        );
-
-        std::smatch match;
-        return std::regex_search(code, match, no_content);
-    };
+	const auto check_if_bracket = [](std::string const& code) -> bool
+		{
+			static const std::regex remove_html_tags{ R"(<[^>]*>)" };
+			static const std::regex no_content(
+				R"(^\s*(?:[{}\s;]+|else(?!\s*if\b)|case\s+\w+\s*:|break\s*;|default\s*:|#(?:ifndef|ifdef|if|endif|else)\b.*|typedef\b.*)\s*(?://)?)"
+			);
+            static const std::regex drop_expansion_view{ R"((.*?)<\s*div\s*class\s*=\s*(['"])expansion-view\1[^>]*>)" };
+            std::string plainCode;
+            std::smatch expansion;
+            if (std::regex_search(code, expansion, drop_expansion_view))
+            {
+                plainCode = std::regex_replace(
+                    expansion.prefix().str(),
+                    remove_html_tags,
+                    ""
+                );
+            }
+            else
+            {
+                plainCode = std::regex_replace(
+                    code,
+                    remove_html_tags,
+                    ""
+                );
+            }
+			return std::regex_match(plainCode, no_content);
+		};
 
     ST_DOMTREE* tree = pDomTree;
     std::stack<ST_DOMTREE*> parent;
@@ -1613,6 +1630,12 @@ static bool create_annotated_html(const std::string& content, std::string& new_c
                                     std::string prefix_str(match.prefix().first, match.prefix().second);
                                     std::string suffix_str(match.suffix().first, match.suffix().second);
                                     code_row = prefix_str + match[1].str() + suffix_str;
+                                    
+                                    static const std::string class_cyan = "$1cyan$2";
+                                    if (std::regex_search(code_row, class_red))
+                                    {
+                                        code_row = std::regex_replace(code_row, class_red, class_cyan);
+                                    }
                                 }
                             }
 
@@ -1835,14 +1858,14 @@ static bool write_html_file(std::filesystem::path const& file_name, const std::s
             out.write(&content[0], content.length());
         }
         catch (const std::exception& ex) {
-            std::cerr << "Could not create file. "
+            std::cerr << "Could not create file. " << "(" << file_name << ") "
                 << ex.what();
             retVal = false;
         }
     }
     else
     {
-        std::cerr << "Unable to create HTML file." << std::endl;
+        std::cerr << "Unable to create HTML file: " << "(" << file_name << ")" << std::endl;
     }
     return retVal;
 }
@@ -2040,7 +2063,7 @@ static bool load_html_code(const std::filesystem::path& root, std::vector<ST_Tex
                 abs_file_path = match[1].str();
             }
             const std::filesystem::path root_file = (root / abs_file_path).lexically_normal();
-            std::cout << "\033[1;32mProcessing: \033[0m" << root_file << std::endl;
+            std::cout << "\033[1;32mProcessing: \033[0m" << root_file.string() << std::endl;
             std::string content;
             retVal &= open_html_file(root_file, content);
             if (retVal)
@@ -2489,7 +2512,7 @@ static bool save_and_annotate_html_files(std::filesystem::path const &root, ST_C
                     if (auto html_file_reference = tree_pos.references.find("href"); html_file_reference != tree_pos.references.cend())
                     {
                         ST_Statistics stats;
-                        std::filesystem::path file_name = file_location->second;// std::filesystem::path(html_file_reference->second);
+                        const std::filesystem::path file_name = file_location->second;// std::filesystem::path(html_file_reference->second);
                         //const auto filename_iterator = tree_pos.references.find("src_file");
                         const std::string file_type = file_name.stem().extension().string();
                         if (file_type == ".cpp" || file_type == ".h" || file_type == ".c")
@@ -2522,8 +2545,8 @@ static bool save_and_annotate_html_files(std::filesystem::path const &root, ST_C
                             stats.file_anchor = (href_file_path.parent_path() / file_name).lexically_normal().string();
                         }
 
-                        const std::filesystem::path physical_file_location = file_location->second;
-                        retVal = patch_html_file((physical_file_location.parent_path() / file_name).lexically_normal(), content, stats);
+                        const std::filesystem::path physical_file_location = file_name.parent_path();
+                        retVal = patch_html_file((physical_file_location / stats.file_name).lexically_normal(), content, stats);
                         if (retVal == true)
                         {
                             statistics[tree_pos.references["href"]] = stats;

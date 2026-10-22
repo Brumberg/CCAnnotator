@@ -55,15 +55,15 @@ int main(int ac, char** av) {
             parameters.annotated_html_folder = vm["annotated_html_folder"].as<std::string>();
             parameters.sourcefile_ext = vm["sourcefile_ext"].as<std::string>();
 
-            retVal = build_node_tree(parameters);
+            retVal = build_node_tree(parameters)?0:1;
 
         }
         else {
-            std::cerr << "source folder not set.\n";
+            std::cerr << "Source folder not set.\n";
         }
     }
     catch (std::exception& e) {
-        std::cerr << "error: " << e.what() << "\n";
+        std::cerr << "Error: " << e.what() << "\n";
         retVal = 1;
     }
     catch (...) {
