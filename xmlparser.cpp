@@ -2063,7 +2063,11 @@ static bool load_html_code(const std::filesystem::path& root, std::vector<ST_Tex
                 abs_file_path = match[1].str();
             }
             const std::filesystem::path root_file = (root / abs_file_path).lexically_normal();
+#ifdef TERMINAL_OUTPUT
             std::cout << "\033[1;32mProcessing: \033[0m" << root_file.string() << std::endl;
+#else
+			std::cout << "Processing: " << root_file.string() << std::endl;
+#endif
             std::string content;
             retVal &= open_html_file(root_file, content);
             if (retVal)
