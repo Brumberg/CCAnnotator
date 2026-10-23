@@ -1113,11 +1113,12 @@ bool build_DOM_tree_nodes(const HTML_RegExExpressions(&html_tags)[N], std::pair<
                 //in.push(on_top);
                 if (top_nodes.size() > 0)
                 {
-                    if ((*top_nodes.top()).content.tag == out_top.tag)
+                    /*if ((*top_nodes.top()).content.tag == out_top.tag)
                     {
                         std::cout << "Resolved tags " << static_cast<size_t>(on_top.tag) << " column " << on_top.matching_pos << std::endl;
                     }
-                    else
+                    else*/
+                    if ((*top_nodes.top()).content.tag != out_top.tag)
                     {
                         std::cout << "Unresolved tags " << static_cast<size_t>(on_top.tag) << " column " << on_top.matching_pos << std::endl;
                     }
